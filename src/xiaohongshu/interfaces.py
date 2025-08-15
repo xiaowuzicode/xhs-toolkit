@@ -45,6 +45,11 @@ class IContentFiller(ABC):
         """填写话题"""
         pass
 
+    @abstractmethod
+    async def fill_commercial_goods(self) -> bool:
+        """勾选商品"""
+        pass
+
 
 class IDataCollector(ABC):
     """数据采集接口"""

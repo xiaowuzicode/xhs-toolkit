@@ -125,7 +125,15 @@ class XHSContentFiller(IContentFiller):
         except Exception as e:
             logger.warning(f"⚠️ 话题填写失败: {e}")
             return False  # 话题填写失败不影响主流程
-    
+
+    async def fill_commercial_goods(self) -> bool:
+        logger.info("🛒 开始勾选商品")
+        try:
+            await self._perform_fill_commercial_goods()
+        except Exception as e:
+            logger.error(f"❌ 商品勾选失败: {e}")
+            return False
+
     def _validate_title(self, title: str) -> None:
         """
         验证标题
@@ -411,6 +419,58 @@ class XHSContentFiller(IContentFiller):
         except Exception as e:
             logger.error(f"❌ 话题自动化过程出错: {e}")
             return False
+
+    async def _perform_fill_commercial_goods(self):
+        """
+        执行商品勾选
+
+        Returns:
+            勾选是否成功
+        """
+        driver = self.browser_manager.driver
+        wait = WebDriverWait(driver, XHSConfig.DEFAULT_WAIT_TIME)
+        logger.debug("🔍 查找下拉框")
+
+        dropdown = driver.find_element(By.CSS_SELECTOR, 'div.description-collapse')
+        if not dropdown:
+            logger.error("❌ 未找到下拉框，无法添加商品")
+            return False
+        dropdown.click()
+        logger.debug("✅ 找到下拉框")
+
+        await asyncio.sleep(0.5)
+        # 2 找到button class multi-good-select-empty-btn并点击
+        logger.debug("🔍 查找添加商品按钮")
+        add_button = driver.find_element(By.CSS_SELECTOR, 'button.multi-good-select-empty-btn')
+        if not add_button:
+            logger.error("❌ 未找到添加商品按钮，无法添加商品")
+            return False
+        logger.debug("✅ 找到添加商品按钮")
+        add_button.click()
+
+        # 查找goods-list-normal下面所有的<input type="checkbox">并点击
+        logger.debug("🔍 查找商品列表中的复选框")
+        await asyncio.sleep(3)
+        checkboxes = driver.find_elements(By.CSS_SELECTOR, 'div.goods-list-normal input[type="checkbox"]')
+        if not checkboxes:
+            logger.error("❌ 未找到商品复选框，无法添加商品")
+            return False
+        logger.debug(f"✅ 找到 {len(checkboxes)} 个商品复选框")
+        # 点击所有复选框
+        for checkbox in checkboxes:
+            checkbox.click()
+            await asyncio.sleep(0.2)
+
+        # 点击右下角的完成按钮d-button-content
+        logger.debug("🔍 查找完成按钮")
+        complete_button = driver.find_element(By.CSS_SELECTOR, 'div.d-button-content')
+        if not complete_button:
+            logger.error("❌ 未找到完成按钮，无法添加商品")
+            return False
+        logger.debug("✅ 找到完成按钮")
+        complete_button.click()
+        await asyncio.sleep(1)
+        return True
     
     async def _input_topic_realistically(self, content_editor, topic_text: str) -> bool:
         """

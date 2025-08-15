@@ -23,6 +23,7 @@ class XHSNote(BaseModel):
     videos: Optional[List[str]] = None
     topics: Optional[List[str]] = None
     location: Optional[str] = None
+    is_commercial: Optional[bool] = False # 新增: 是否为商业笔记字段
     
     @field_validator('title')
     @classmethod
@@ -159,9 +160,10 @@ class XHSNote(BaseModel):
             location=location if location else None
         )
 
-    @classmethod  
-    def smart_create(cls, title: str, content: str, topics=None, 
-                    location: str = "", images=None, videos=None) -> 'XHSNote':
+    @classmethod
+    def smart_create(cls, title: str, content: str, topics=None,
+                     location: str = "", images=None, videos=None,
+                     is_commercial=False) -> 'XHSNote':
         """
         智能创建笔记对象，支持多种输入格式
         
@@ -172,6 +174,7 @@ class XHSNote(BaseModel):
             location: 位置信息
             images: 图片路径（支持字符串、列表、JSON等多种格式）
             videos: 视频路径（支持字符串、列表、JSON等多种格式）
+            is_commercial: 是否为商业笔记 (新增)
             
         Returns:
             XHSNote实例
@@ -199,12 +202,14 @@ class XHSNote(BaseModel):
             images=image_list,
             videos=video_list,
             topics=topic_list,
-            location=location if location else None
+            location=location if location else None,
+            is_commercial=is_commercial # 新增: 传递 is_commercial 参数
         )
-    
+
     @classmethod
     async def async_smart_create(cls, title: str, content: str, topics=None,
-                                location: str = "", images=None, videos=None) -> 'XHSNote':
+                                 location: str = "", images=None, videos=None,
+                                 is_commercial=False) -> 'XHSNote':
         """
         异步智能创建笔记对象，支持多种输入格式（包括URL）
         
@@ -218,6 +223,7 @@ class XHSNote(BaseModel):
                    - 网络地址："https://example.com/image.jpg"
                    - 混合数组：["local.jpg", "https://example.com/img.jpg"]
             videos: 视频路径（目前仅支持本地文件）
+            is_commercial: 是否为商业笔记 (新增)
             
         Returns:
             XHSNote实例
@@ -249,7 +255,8 @@ class XHSNote(BaseModel):
             images=processed_images,
             videos=video_list,
             topics=topic_list,
-            location=location if location else None
+            location=location if location else None,
+            is_commercial=is_commercial # 新增: 传递 is_commercial 参数
         )
 
 

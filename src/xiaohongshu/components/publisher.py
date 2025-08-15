@@ -99,8 +99,11 @@ class XHSPublisher(IPublisher):
             
             # 3. 填写笔记内容
             await self._fill_note_content(note)
+
+            # 4. 如果是商业笔记，处理商品信息
+            await self._fill_commercial_goods(note)
             
-            # 4. 提交发布
+            # 5. 提交发布
             return await self._submit_note(note)
             
         except Exception as e:
@@ -230,13 +233,22 @@ class XHSPublisher(IPublisher):
                     logger.warning("⚠️ 话题填写失败，但继续发布流程")
             else:
                 logger.info("📝 未提供话题，跳过话题填写")
-            
+
+            if note.is_commercial:
+                logger.info(f"💼 处理商业笔记，勾选所有商品")
+                success = await self.content_filler.fill_commercial_products(note.products)
         except Exception as e:
             if isinstance(e, PublishError):
                 raise
             else:
                 raise PublishError(f"内容填写失败: {str(e)}", publish_step="内容填写") from e
-    
+
+    async def _fill_commercial_goods(self, note: XHSNote) -> None:
+        if note.is_commercial is False:
+            logger.info("🛒 当前笔记不是商业笔记，跳过商品处理")
+            return
+        await self.content_filler.fill_commercial_goods(note.products);
+
     async def _submit_note(self, note: XHSNote) -> XHSPublishResult:
         """提交发布笔记"""
         from ..constants import XHSSelectors, get_publish_button_selectors

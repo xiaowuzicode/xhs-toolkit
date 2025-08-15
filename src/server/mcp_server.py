@@ -234,7 +234,7 @@ class MCPServer:
         
         @self.mcp.tool()
         async def smart_publish_note(title: str, content: str, images=None, videos=None, 
-                                   topics=None, location: str = "") -> str:
+                                   topics=None, location: str = "", is_commercial: bool = False) -> str:
             """
             发布小红书笔记（支持多种输入格式）
             
@@ -251,6 +251,7 @@ class MCPServer:
                 videos: 视频路径（目前仅支持本地文件）
                 topics: 话题，支持字符串或数组格式
                 location (str, optional): 位置信息
+                is_commercial: 是否为商业笔记
             
             Returns:
                 str: 任务ID和状态信息
@@ -275,7 +276,8 @@ class MCPServer:
                     topics=topics,
                     location=location,
                     images=images,
-                    videos=videos
+                    videos=videos,
+                    is_commercial=is_commercial
                 )
                 
                 # 记录解析结果
