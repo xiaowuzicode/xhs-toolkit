@@ -134,4 +134,27 @@ def is_supported_video_format(file_path: str) -> bool:
     """检查是否为支持的视频格式"""
     import os
     _, ext = os.path.splitext(file_path.lower())
-    return ext in XHSConfig.SUPPORTED_VIDEO_FORMATS 
+    return ext in XHSConfig.SUPPORTED_VIDEO_FORMATS
+
+
+def getSetEndOfContenteditable():
+    js_script = """
+            function setEndOfContenteditable(contentEditableElement) {
+                var range, selection;
+                if (document.createRange) { // Firefox, Chrome, Opera, Safari, IE 9+
+                    range = document.createRange();
+                    range.selectNodeContents(contentEditableElement);
+                    range.collapse(false); // collapse to end
+                    selection = window.getSelection();
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                } else if (document.selection) { // IE 8 and lower
+                    range = document.body.createTextRange();
+                    range.moveToElementText(contentEditableElement);
+                    range.collapse(false);
+                    range.select();
+                }
+            }
+            setEndOfContenteditable(arguments[0]);
+            """
+    return js_script
