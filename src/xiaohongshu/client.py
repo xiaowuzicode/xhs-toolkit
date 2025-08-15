@@ -22,6 +22,7 @@ from ..utils.text_utils import clean_text_for_browser, truncate_text
 from ..utils.logger import get_logger
 from .models import XHSNote, XHSSearchResult, XHSUser, XHSPublishResult
 from .components.content_filler import XHSContentFiller
+from .constants import (XHSConfig)
 
 logger = get_logger(__name__)
 
@@ -122,6 +123,12 @@ class XHSClient:
             
             # 填写笔记内容
             await self._fill_note_content(note)
+
+            if note.is_commercial:
+                logger.info("🛒 开始勾选商业商品...")
+                success = await self._fill_commercial_goods()
+                if not success:
+                    logger.warning("⚠️ 商品勾选失败，但继续发布流程")
             
             # 发布笔记
             return await self._submit_note(note)
@@ -132,6 +139,67 @@ class XHSClient:
                 raise
             else:
                 raise PublishError(f"发布流程执行失败: {str(e)}", publish_step="流程执行") from e
+
+    async def _fill_commercial_goods(self):
+        """
+        执行商品勾选
+
+        Returns:
+            勾选是否成功
+        """
+        driver = self.browser_manager.driver
+        wait = WebDriverWait(driver, XHSConfig.DEFAULT_WAIT_TIME)
+        logger.debug("🔍 查找下拉框")
+
+        dropdown = driver.find_element(By.CSS_SELECTOR, 'div.description-collapse')
+        if not dropdown:
+            logger.error("❌ 未找到下拉框，无法添加商品")
+            return False
+        dropdown.click()
+        logger.info("✅ 找到下拉框")
+
+        await asyncio.sleep(3)
+        # 2 找到button class multi-good-select-empty-btn并点击
+        logger.debug("🔍 查找添加商品按钮")
+        add_button = driver.find_element(By.CSS_SELECTOR, 'div.multi-good-select-empty-btn')
+        if not add_button:
+            logger.error("❌ 未找到添加商品按钮，无法添加商品")
+            return False
+        logger.info("✅ 找到添加商品按钮")
+        add_button.click()
+        await asyncio.sleep(3)
+
+
+        # 查找goods-list-normal下面所有的<input type="checkbox">并点击
+        logger.info("🔍 查找商品列表中的复选框")
+        checkboxes = driver.find_elements(By.CSS_SELECTOR, 'span.d-checkbox-simulator')
+        if not checkboxes:
+            logger.error("❌ 未找到商品复选框，无法添加商品")
+            return False
+        logger.info(f"✅ 找到 {len(checkboxes)} 个商品复选框")
+        # 点击所有复选框
+        for checkbox in checkboxes:
+            checkbox.click()
+            await asyncio.sleep(1)
+
+        # 点击右下角的完成按钮d-button-content
+        logger.info("🔍 查找完成按钮")
+        complete_buttons = driver.find_elements(By.CSS_SELECTOR, 'button.d-button-with-content')
+
+        if not complete_buttons:
+            logger.error("❌ 未找到完成按钮，无法添加商品")
+            return False
+        # filter with inner "保存"
+        complete_buttons = [btn for btn in complete_buttons if "保存" in btn.text]
+        if not complete_buttons:
+            logger.error("❌ 未找到包含'保存'的完成按钮，无法添加商品")
+            return False
+        complete_button = complete_buttons[0]
+        logger.info("✅ 找到完成按钮")
+        complete_button.click()
+        await asyncio.sleep(1)
+        return True
+
 
     async def _switch_publish_mode(self, note: XHSNote) -> None:
         """根据笔记内容类型切换发布模式（图文/视频）"""
@@ -466,7 +534,7 @@ class XHSClient:
             
             if not submit_btn:
                 raise PublishError("无法找到发布按钮", publish_step="查找发布按钮")
-            
+
             submit_btn.click()
             logger.info("✅ 发布按钮已点击")
             await asyncio.sleep(3)

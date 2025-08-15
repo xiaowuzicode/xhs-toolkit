@@ -251,7 +251,7 @@ class MCPServer:
                 videos: 视频路径（目前仅支持本地文件）
                 topics: 话题，支持字符串或数组格式
                 location (str, optional): 位置信息
-                is_commercial: 是否为商业笔记
+                is_commercial (boolean): 是否为商业笔记
             
             Returns:
                 str: 任务ID和状态信息
