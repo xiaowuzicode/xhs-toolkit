@@ -535,8 +535,8 @@ class XHSClient:
             if not submit_btn:
                 raise PublishError("无法找到发布按钮", publish_step="查找发布按钮")
 
-            logger.info("✅ 发布前准备45s")
-            await asyncio.sleep(45)
+            logger.info("✅ 发布前准备120s")
+            await asyncio.sleep(120)
 
 
             submit_btn.click()
