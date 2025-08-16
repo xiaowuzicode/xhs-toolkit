@@ -250,6 +250,7 @@ class MCPServer:
                        - 逗号分隔字符串："a.jpg,b.jpg,c.jpg"
                 videos: 视频路径（目前仅支持本地文件）
                 topics: 话题，支持字符串或数组格式
+                        例如 "话题1,话题2" 或 ["话题1", "话题2"]
                 location (str, optional): 位置信息
                 is_commercial (boolean): 是否为商业笔记
             
@@ -261,7 +262,8 @@ class MCPServer:
                 smart_publish_note(
                     title="美食分享",
                     content="今天的美食",
-                    images=["https://example.com/food.jpg"]
+                    images="a.jpg,b.jpg,c.jpg"
+                    topics="话题1,话题2"
                 )
                 
             """
