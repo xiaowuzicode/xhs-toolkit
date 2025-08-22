@@ -90,3 +90,4 @@ data/creator_db/
 .cursorignore
 .cursorignore
 chrome-mac-x64
+chrome-mac-arm64
