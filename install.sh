@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🌺 小红书MCP工具包 v1.2.0 - 快速安装脚本"
+echo "🌺 小红书MCP工具包 v1.3.1 - 快速安装脚本"
 echo "============================================"
 
 # 检查操作系统
@@ -75,9 +75,11 @@ echo "📋 下一步："
 echo "1. 运行: ./xhs-toolkit cookie save"
 echo "2. 运行: ./xhs-toolkit server start"
 echo ""
-echo "🆕 v1.2.0 新功能："
+echo "🆕 v1.3.1 新功能："
+echo "🔍 小红书URL解析功能已启用"
 echo "📊 数据采集与AI分析功能已启用"
 echo "📁 数据将保存在 data/creator_db/ 目录"
+echo "🤖 AI可通过 parse_xiaohongshu_url 工具解析小红书链接"
 echo "🤖 AI可通过 get_creator_data_analysis 工具分析您的账号数据"
 echo ""
 echo "💡 更多帮助: ./xhs-toolkit --help" 

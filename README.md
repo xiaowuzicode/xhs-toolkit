@@ -26,6 +26,7 @@
 - [x] **图文发布** - 支持发布图文笔记
 - [x] **视频发布** - 支持发布视频笔记
 - [x] **话题标签** - 支持自动添加话题标签，提升内容曝光度
+- [x] **URL解析** - 支持解析小红书页面内容（笔记、用户主页等）
 - [ ] **内容搜索** - 支持指定搜索（开发计划中）
 
 ### 数据采集 
@@ -155,7 +156,7 @@ python install_deps.py  # 安装依赖向导
 
 ```
 ╭─────────────────────────────────────────╮
-│         小红书MCP工具包 v1.3.0           │
+│         小红书MCP工具包 v1.3.1           │
 │           快速操作菜单系统                │
 ╰─────────────────────────────────────────╯
 
@@ -327,6 +328,7 @@ WEBDRIVER_CHROME_DRIVER="/opt/homebrew/bin/chromedriver"
 | `get_task_result` | 获取已完成任务的结果 | task_id | 获取最终发布结果 |
 | `login_xiaohongshu` | 智能登录小红书 | force_relogin, quick_mode | MCP专用无交互登录 |
 | `get_creator_data_analysis` | 获取创作者数据用于分析 | 无 | AI数据分析专用 |
+| `parse_xiaohongshu_url` | 解析小红书URL内容 ⚡ | url, include_raw_html | 提取页面标题、内容、图片等结构化数据 |
 
 
 
@@ -372,6 +374,17 @@ WEBDRIVER_CHROME_DRIVER="/opt/homebrew/bin/chromedriver"
 ```
 请分析我的小红书账号数据，给出内容优化建议
 ```
+
+#### 🔍 URL内容解析
+```
+请解析这个小红书链接的内容：https://www.xiaohongshu.com/user/profile/67f8fd81000000000e010b43
+```
+
+**解析功能特性**：
+- **智能识别页面类型**：自动识别笔记、用户主页、话题页面等
+- **结构化数据提取**：提取标题、内容、作者、图片、标签等完整信息
+- **多元素支持**：支持提取互动数据（点赞、评论、分享数）
+- **容错处理**：完善的错误处理，确保解析稳定性
 
 #### 🔧 发布原理
 
@@ -439,6 +452,44 @@ COLLECTION_SCHEDULE=0 2 1 * *
 ```
 
 ---
+## 🚀 更新日志 - v1.3.1
+
+### 🆕 新增功能
+
+#### 🔍 小红书URL解析功能
+- **全新URL解析系统**：支持解析小红书各种页面类型（笔记、用户主页、话题页面等）
+- **智能页面识别**：自动检测页面类型，采用对应的解析策略
+- **结构化数据提取**：提取标题、内容、作者、图片、标签、互动数据等完整信息
+- **MCP工具集成**：新增`parse_xiaohongshu_url`工具，支持AI对话式URL解析
+
+#### 🧠 解析技术特性
+- **多层解析策略**：支持JSON-LD结构化数据、页面元素选择器、通用内容提取
+- **BeautifulSoup4集成**：使用专业HTML解析库，确保解析准确性
+- **容错机制**：完善的异常处理和多重备用方案
+- **浏览器自动化**：复用现有Chrome浏览器管理器，支持cookie加载
+
+### 使用示例
+
+```python
+# 通过AI对话使用
+"请解析这个小红书链接：https://www.xiaohongshu.com/user/profile/..."
+
+# MCP工具直接调用
+parse_xiaohongshu_url(
+    url="https://www.xiaohongshu.com/user/profile/...",
+    include_raw_html=False  # 可选：包含原始HTML用于调试
+)
+```
+
+### 技术细节
+- **依赖管理**：新增`beautifulsoup4>=4.12.0`依赖
+- **数据模型**：新增`XHSUrlParseResult`数据模型
+- **解析引擎**：支持笔记页面、用户页面、通用页面的专门解析逻辑
+
+---
+
+<details>
+<summary>📜 点击查看 v1.3.0 更新日志</summary>
 ## 🚀 更新日志 - v1.3.0
 
 ### 🎯 重要功能更新

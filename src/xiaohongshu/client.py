@@ -20,7 +20,7 @@ from ..core.exceptions import PublishError, NetworkError, handle_exception
 from ..auth.cookie_manager import CookieManager
 from ..utils.text_utils import clean_text_for_browser, truncate_text
 from ..utils.logger import get_logger
-from .models import XHSNote, XHSSearchResult, XHSUser, XHSPublishResult
+from .models import XHSNote, XHSSearchResult, XHSUser, XHSPublishResult, XHSUrlParseResult
 from .components.content_filler import XHSContentFiller
 from .constants import (XHSConfig)
 
@@ -963,6 +963,403 @@ class XHSClient:
             self.browser_manager.close_driver()
         
         return result
+
+    @handle_exception
+    async def parse_xiaohongshu_url(self, url: str, include_raw_html: bool = False) -> XHSUrlParseResult:
+        """
+        解析小红书URL，提取页面内容信息
+        
+        Args:
+            url: 小红书页面URL
+            include_raw_html: 是否在结果中包含原始HTML（用于调试）
+            
+        Returns:
+            URL解析结果
+            
+        Raises:
+            NetworkError: 当网络访问出错时
+        """
+        logger.info(f"🔍 开始解析小红书URL: {url}")
+        
+        try:
+            # 创建浏览器驱动
+            driver = self.browser_manager.create_driver()
+            
+            # 加载cookies以获得更好的访问权限
+            cookies = self.cookie_manager.load_cookies()
+            if cookies:
+                # 先访问小红书主页设置cookies
+                driver.get("https://www.xiaohongshu.com")
+                await asyncio.sleep(2)
+                
+                cookie_result = self.browser_manager.load_cookies(cookies)
+                logger.info(f"🍪 Cookies加载结果: {cookie_result}")
+            
+            # 访问目标URL
+            logger.info(f"🌐 访问目标URL: {url}")
+            driver.get(url)
+            await asyncio.sleep(5)  # 等待页面加载
+            
+            # 获取页面HTML
+            page_html = driver.page_source
+            current_url = driver.current_url
+            
+            logger.info(f"📍 实际访问的URL: {current_url}")
+            
+            # 解析页面内容
+            result = await self._parse_page_content(url, page_html, current_url)
+            
+            # 可选：包含原始HTML
+            if include_raw_html:
+                result.raw_html = page_html
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ 解析URL失败: {e}")
+            return XHSUrlParseResult(
+                success=False,
+                url=url,
+                error_message=f"解析URL失败: {str(e)}"
+            )
+        finally:
+            # 确保浏览器被关闭
+            self.browser_manager.close_driver()
+
+    async def _parse_page_content(self, original_url: str, html: str, current_url: str) -> XHSUrlParseResult:
+        """
+        解析页面HTML内容，提取结构化数据
+        
+        Args:
+            original_url: 原始请求URL
+            html: 页面HTML内容
+            current_url: 实际访问的URL
+            
+        Returns:
+            解析结果
+        """
+        try:
+            from bs4 import BeautifulSoup
+            import re
+            import json
+            
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # 判断页面类型
+            page_type = self._detect_page_type(current_url, soup)
+            logger.info(f"🔍 检测到页面类型: {page_type}")
+            
+            result = XHSUrlParseResult(
+                success=True,
+                url=original_url,
+                page_type=page_type
+            )
+            
+            if page_type == "note":
+                # 解析笔记页面
+                await self._parse_note_page(soup, result)
+            elif page_type == "user":
+                # 解析用户页面
+                await self._parse_user_page(soup, result)
+            else:
+                # 通用解析
+                await self._parse_generic_page(soup, result)
+            
+            return result
+            
+        except ImportError:
+            logger.error("❌ 缺少BeautifulSoup库，请安装: pip install beautifulsoup4")
+            return XHSUrlParseResult(
+                success=False,
+                url=original_url,
+                error_message="缺少BeautifulSoup库，请安装: pip install beautifulsoup4"
+            )
+        except Exception as e:
+            logger.error(f"❌ 解析页面内容失败: {e}")
+            return XHSUrlParseResult(
+                success=False,
+                url=original_url,
+                error_message=f"解析页面内容失败: {str(e)}"
+            )
+
+    def _detect_page_type(self, url: str, soup) -> str:
+        """
+        检测页面类型
+        
+        Args:
+            url: 页面URL
+            soup: BeautifulSoup对象
+            
+        Returns:
+            页面类型: "note", "user", "topic", "unknown"
+        """
+        try:
+            # 通过URL路径判断
+            if "/explore/" in url or "/discovery/" in url:
+                return "note"
+            elif "/user/" in url or "/profile/" in url:
+                return "user"
+            elif "/topic/" in url:
+                return "topic"
+            
+            # 通过页面元素判断
+            if soup.find(attrs={"data-testid": "note-detail"}) or soup.find(class_=re.compile("note")):
+                return "note"
+            elif soup.find(attrs={"data-testid": "user-profile"}) or soup.find(class_=re.compile("profile")):
+                return "user"
+            
+            return "unknown"
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 检测页面类型失败: {e}")
+            return "unknown"
+
+    async def _parse_note_page(self, soup, result: XHSUrlParseResult):
+        """
+        解析笔记页面内容
+        
+        Args:
+            soup: BeautifulSoup对象
+            result: 解析结果对象（会被修改）
+        """
+        try:
+            import re
+            import json
+            
+            # 尝试从JSON-LD中提取信息
+            json_scripts = soup.find_all('script', type='application/ld+json')
+            for script in json_scripts:
+                try:
+                    data = json.loads(script.string)
+                    if isinstance(data, dict) and data.get('@type') == 'Article':
+                        result.title = data.get('headline')
+                        result.content = data.get('description') or data.get('text')
+                        result.author = data.get('author', {}).get('name') if isinstance(data.get('author'), dict) else None
+                        result.publish_time = data.get('datePublished')
+                        break
+                except:
+                    continue
+            
+            # 尝试从页面元素中提取标题
+            if not result.title:
+                title_selectors = [
+                    '[data-testid="note-title"]',
+                    '.note-title',
+                    'h1',
+                    '.title',
+                    '[class*="title"]'
+                ]
+                for selector in title_selectors:
+                    title_elem = soup.select_one(selector)
+                    if title_elem and title_elem.get_text(strip=True):
+                        result.title = title_elem.get_text(strip=True)
+                        break
+            
+            # 尝试从页面元素中提取内容
+            if not result.content:
+                content_selectors = [
+                    '[data-testid="note-content"]',
+                    '.note-content',
+                    '.content',
+                    '[class*="content"]',
+                    'p'
+                ]
+                for selector in content_selectors:
+                    content_elem = soup.select_one(selector)
+                    if content_elem and content_elem.get_text(strip=True):
+                        result.content = content_elem.get_text(strip=True)
+                        break
+            
+            # 提取作者信息
+            if not result.author:
+                author_selectors = [
+                    '[data-testid="author-name"]',
+                    '.author-name',
+                    '.username',
+                    '[class*="author"]'
+                ]
+                for selector in author_selectors:
+                    author_elem = soup.select_one(selector)
+                    if author_elem and author_elem.get_text(strip=True):
+                        result.author = author_elem.get_text(strip=True)
+                        break
+            
+            # 提取图片
+            img_elements = soup.find_all('img')
+            images = []
+            for img in img_elements:
+                src = img.get('src') or img.get('data-src')
+                if src and ('xiaohongshu' in src or 'xhscdn' in src):
+                    if src.startswith('//'):
+                        src = 'https:' + src
+                    elif src.startswith('/'):
+                        src = 'https://www.xiaohongshu.com' + src
+                    images.append(src)
+            
+            if images:
+                result.images = images[:9]  # 最多保存9张图片
+            
+            # 提取标签/话题
+            tag_selectors = [
+                '[data-testid="tag"]',
+                '.tag',
+                '.topic',
+                '[class*="tag"]',
+                '[class*="topic"]'
+            ]
+            tags = []
+            for selector in tag_selectors:
+                tag_elements = soup.select(selector)
+                for tag_elem in tag_elements:
+                    tag_text = tag_elem.get_text(strip=True)
+                    if tag_text and tag_text.startswith('#'):
+                        tags.append(tag_text)
+            
+            if tags:
+                result.tags = list(set(tags))  # 去重
+            
+            # 提取互动数据（点赞、评论、分享）
+            self._extract_interaction_data(soup, result)
+            
+            logger.info(f"✅ 笔记页面解析完成 - 标题: {result.title}")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 解析笔记页面时出错: {e}")
+
+    async def _parse_user_page(self, soup, result: XHSUrlParseResult):
+        """
+        解析用户页面内容
+        
+        Args:
+            soup: BeautifulSoup对象
+            result: 解析结果对象（会被修改）
+        """
+        try:
+            # 提取用户名
+            username_selectors = [
+                '[data-testid="username"]',
+                '.username',
+                '.nickname',
+                'h1',
+                '[class*="name"]'
+            ]
+            for selector in username_selectors:
+                username_elem = soup.select_one(selector)
+                if username_elem and username_elem.get_text(strip=True):
+                    result.author = username_elem.get_text(strip=True)
+                    result.title = f"{result.author}的主页"
+                    break
+            
+            # 提取简介
+            bio_selectors = [
+                '[data-testid="bio"]',
+                '.bio',
+                '.description',
+                '.intro',
+                '[class*="desc"]'
+            ]
+            for selector in bio_selectors:
+                bio_elem = soup.select_one(selector)
+                if bio_elem and bio_elem.get_text(strip=True):
+                    result.content = bio_elem.get_text(strip=True)
+                    break
+            
+            # 提取头像
+            avatar_elem = soup.select_one('img[class*="avatar"], img[class*="profile"]')
+            if avatar_elem:
+                avatar_src = avatar_elem.get('src') or avatar_elem.get('data-src')
+                if avatar_src:
+                    if avatar_src.startswith('//'):
+                        avatar_src = 'https:' + avatar_src
+                    result.images = [avatar_src]
+            
+            logger.info(f"✅ 用户页面解析完成 - 用户: {result.author}")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 解析用户页面时出错: {e}")
+
+    async def _parse_generic_page(self, soup, result: XHSUrlParseResult):
+        """
+        通用页面解析
+        
+        Args:
+            soup: BeautifulSoup对象
+            result: 解析结果对象（会被修改）
+        """
+        try:
+            # 提取页面标题
+            title_elem = soup.find('title')
+            if title_elem:
+                result.title = title_elem.get_text(strip=True)
+            
+            # 提取meta描述
+            meta_desc = soup.find('meta', attrs={'name': 'description'})
+            if meta_desc:
+                result.content = meta_desc.get('content', '').strip()
+            
+            # 提取页面主要文本内容
+            if not result.content:
+                # 尝试找到主要内容区域
+                main_content_selectors = [
+                    'main',
+                    '[role="main"]',
+                    '.main-content',
+                    '.content',
+                    'article',
+                    '.post'
+                ]
+                for selector in main_content_selectors:
+                    content_elem = soup.select_one(selector)
+                    if content_elem:
+                        text_content = content_elem.get_text(strip=True)
+                        if len(text_content) > 50:  # 确保内容足够长
+                            result.content = text_content[:500] + "..." if len(text_content) > 500 else text_content
+                            break
+            
+            logger.info(f"✅ 通用页面解析完成 - 标题: {result.title}")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 通用页面解析时出错: {e}")
+
+    def _extract_interaction_data(self, soup, result: XHSUrlParseResult):
+        """
+        提取互动数据（点赞、评论、分享）
+        
+        Args:
+            soup: BeautifulSoup对象
+            result: 解析结果对象（会被修改）
+        """
+        try:
+            import re
+            
+            # 寻找包含数字的元素，通常是互动数据
+            interaction_selectors = [
+                '[class*="like"]',
+                '[class*="comment"]',
+                '[class*="share"]',
+                '[class*="collect"]',
+                '[data-testid*="like"]',
+                '[data-testid*="comment"]',
+                '[data-testid*="share"]'
+            ]
+            
+            for selector in interaction_selectors:
+                elements = soup.select(selector)
+                for elem in elements:
+                    text = elem.get_text(strip=True)
+                    # 提取数字
+                    numbers = re.findall(r'\d+', text)
+                    if numbers:
+                        number = int(numbers[0])
+                        if 'like' in elem.get('class', []) or 'like' in selector:
+                            result.likes = number
+                        elif 'comment' in elem.get('class', []) or 'comment' in selector:
+                            result.comments = number
+                        elif 'share' in elem.get('class', []) or 'share' in selector:
+                            result.shares = number
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 提取互动数据时出错: {e}")
 
 
 # 便捷函数

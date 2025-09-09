@@ -345,6 +345,47 @@ class CookieInfo(BaseModel):
         return v.strip()
 
 
+class XHSUrlParseResult(BaseModel):
+    """小红书URL解析结果数据模型"""
+    
+    success: bool
+    url: str
+    page_type: Optional[str] = None  # "note", "user", "topic", "unknown"
+    title: Optional[str] = None
+    content: Optional[str] = None
+    author: Optional[str] = None
+    author_id: Optional[str] = None
+    images: Optional[List[str]] = None  # 图片URL列表
+    tags: Optional[List[str]] = None
+    likes: Optional[int] = None
+    comments: Optional[int] = None
+    shares: Optional[int] = None
+    publish_time: Optional[str] = None
+    location: Optional[str] = None
+    error_message: Optional[str] = None
+    raw_html: Optional[str] = None  # 可选：保存原始HTML用于调试
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return {
+            "success": self.success,
+            "url": self.url,
+            "page_type": self.page_type,
+            "title": self.title,
+            "content": self.content,
+            "author": self.author,
+            "author_id": self.author_id,
+            "images": self.images,
+            "tags": self.tags,
+            "likes": self.likes,
+            "comments": self.comments,
+            "shares": self.shares,
+            "publish_time": self.publish_time,
+            "location": self.location,
+            "error_message": self.error_message
+        }
+
+
 class CookiesData(BaseModel):
     """Cookies数据容器"""
     

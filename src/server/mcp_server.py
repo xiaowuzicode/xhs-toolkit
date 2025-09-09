@@ -541,6 +541,93 @@ class MCPServer:
                     "message": error_msg
                 }, ensure_ascii=False, indent=2)
 
+        @self.mcp.tool()
+        async def parse_xiaohongshu_url(url: str, include_raw_html: bool = False) -> str:
+            """
+            解析小红书URL，提取页面内容信息
+            
+            支持解析小红书的各种页面类型：笔记页面、用户主页等，提取其中的文本内容、图片、作者信息等结构化数据。
+            
+            Args:
+                url (str): 小红书页面URL，支持格式：
+                          - 笔记链接：https://www.xiaohongshu.com/explore/...
+                          - 用户主页：https://www.xiaohongshu.com/user/profile/...
+                          - 其他小红书页面URL
+                include_raw_html (bool): 是否在结果中包含原始HTML内容（用于调试，默认False）
+            
+            Returns:
+                str: 解析结果的JSON字符串，包含以下信息：
+                    - success: 解析是否成功
+                    - url: 原始URL
+                    - page_type: 页面类型（note/user/topic/unknown）
+                    - title: 页面标题
+                    - content: 页面文本内容
+                    - author: 作者信息
+                    - images: 图片URL列表
+                    - tags: 标签/话题列表
+                    - likes/comments/shares: 互动数据
+                    - publish_time: 发布时间
+                    - error_message: 错误信息（如果失败）
+                    
+            示例:
+                parse_xiaohongshu_url("https://www.xiaohongshu.com/explore/...")
+                parse_xiaohongshu_url("https://www.xiaohongshu.com/user/profile/...", include_raw_html=True)
+            """
+            logger.info(f"🔍 收到URL解析请求: {url}")
+            
+            try:
+                # 基本URL验证
+                if not url or not isinstance(url, str):
+                    return json.dumps({
+                        "success": False,
+                        "url": url,
+                        "error_message": "URL不能为空且必须是字符串"
+                    }, ensure_ascii=False, indent=2)
+                
+                # 检查是否为小红书URL
+                if "xiaohongshu.com" not in url and "xhslink.com" not in url:
+                    return json.dumps({
+                        "success": False,
+                        "url": url,
+                        "error_message": "只支持解析小红书官方链接（包含xiaohongshu.com或xhslink.com）"
+                    }, ensure_ascii=False, indent=2)
+                
+                # 创建新的客户端实例进行解析
+                client = XHSClient(self.config)
+                
+                # 执行URL解析
+                result = await client.parse_xiaohongshu_url(url, include_raw_html)
+                
+                # 格式化返回结果
+                response_data = result.to_dict()
+                
+                # 添加解析统计信息
+                response_data["parsing_stats"] = {
+                    "images_found": len(result.images) if result.images else 0,
+                    "tags_found": len(result.tags) if result.tags else 0,
+                    "has_author": bool(result.author),
+                    "has_content": bool(result.content),
+                    "page_type": result.page_type
+                }
+                
+                # 成功日志
+                if result.success:
+                    logger.info(f"✅ URL解析成功 - 类型: {result.page_type}, 标题: {result.title}")
+                else:
+                    logger.warning(f"⚠️ URL解析失败: {result.error_message}")
+                
+                return json.dumps(response_data, ensure_ascii=False, indent=2)
+                
+            except Exception as e:
+                error_msg = f"URL解析过程出错: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                return json.dumps({
+                    "success": False,
+                    "url": url,
+                    "error_message": error_msg,
+                    "suggestion": "请检查URL格式是否正确，或稍后重试"
+                }, ensure_ascii=False, indent=2)
+
 
     async def _execute_publish_task(self, task_id: str) -> None:
         """
@@ -823,7 +910,8 @@ class MCPServer:
         # 工具已在__init__中注册
         logger.info(f"🎯 MCP工具列表:")
         for tool in ["test_connection", "smart_publish_note", "check_task_status",
-                     "get_task_result", "login_xiaohongshu", "get_creator_data_analysis"]:
+                     "get_task_result", "login_xiaohongshu", "get_creator_data_analysis",
+                     "parse_xiaohongshu_url"]:
             logger.info(f"   • {tool}")
 
         # 初始化数据采集（如果启用）
@@ -889,6 +977,7 @@ class MCPServer:
         logger.info("   • get_task_result - 获取已完成任务的结果")
         logger.info("   • login_xiaohongshu - 智能登录小红书")
         logger.info("   • get_creator_data_analysis - 获取创作者数据用于分析")
+        logger.info("   • parse_xiaohongshu_url - 解析小红书URL，提取页面内容")
 
         logger.info("🔧 按 Ctrl+C 停止服务器")
         logger.info("💡 终止时的ASGI错误信息是正常现象，可以忽略")
