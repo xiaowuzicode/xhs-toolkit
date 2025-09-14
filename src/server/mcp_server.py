@@ -26,6 +26,7 @@ from ..xiaohongshu.models import XHSNote
 from ..utils.logger import get_logger, setup_logger
 from ..data import storage_manager, data_scheduler
 from ..auth.smart_auth_server import SmartAuthServer, create_smart_auth_server
+from .xhs_api_adapter import XhsApiAdapter
 
 logger = get_logger(__name__)
 
@@ -128,6 +129,7 @@ class MCPServer:
         self.task_manager = TaskManager()  # 添加任务管理器
         self.scheduler_initialized = False  # 调度器初始化标志
         self.auth_server = create_smart_auth_server(config)  # 智能认证服务器
+        self.xhs_api_adapter = XhsApiAdapter(config)  # XHS API 适配器
         self._setup_tools()
         self._setup_resources()
         self._setup_prompts()
@@ -628,6 +630,419 @@ class MCPServer:
                     "suggestion": "请检查URL格式是否正确，或稍后重试"
                 }, ensure_ascii=False, indent=2)
 
+        @self.mcp.tool()
+        async def search_notes(keywords: str) -> str:
+            """
+            根据关键词搜索笔记
+            
+            这个工具基于小红书官方API实现，可以根据用户输入的关键词搜索相关的笔记内容。
+            搜索结果包括笔记标题、点赞数、链接等信息，帮助用户快速找到感兴趣的内容。
+            
+            Args:
+                keywords (str): 搜索关键词，例如："美食推荐"、"护肤心得"、"旅行攻略"等
+            
+            Returns:
+                str: 搜索结果的JSON字符串，包含以下信息：
+                    - success: 搜索是否成功
+                    - message: 结果描述信息
+                    - results: 搜索结果列表，每个结果包含：
+                        * title: 笔记标题
+                        * liked_count: 点赞数
+                        * url: 笔记链接（包含xsec_token）
+                        * index: 结果序号
+                    - total_count: 搜索结果总数
+                    - error_message: 错误信息（如果失败）
+                        
+            示例:
+                search_notes("美食推荐")
+                search_notes("护肤心得")
+            """
+            logger.info(f"🔍 收到搜索笔记请求: {keywords}")
+            
+            try:
+                # 基本参数验证
+                if not keywords or not isinstance(keywords, str):
+                    return json.dumps({
+                        "success": False,
+                        "message": "搜索关键词不能为空且必须是字符串",
+                        "error_message": "无效的搜索参数"
+                    }, ensure_ascii=False, indent=2)
+                
+                keywords = keywords.strip()
+                if len(keywords) == 0:
+                    return json.dumps({
+                        "success": False,
+                        "message": "搜索关键词不能为空",
+                        "error_message": "搜索关键词为空"
+                    }, ensure_ascii=False, indent=2)
+                
+                # 调用API搜索
+                data = await self.xhs_api_adapter.search_notes(keywords)
+                
+                # 处理搜索结果
+                results = []
+                if 'data' in data and 'items' in data['data'] and len(data['data']['items']) > 0:
+                    for i, item in enumerate(data['data']['items']):
+                        if 'note_card' in item and 'display_title' in item['note_card']:
+                            title = item['note_card']['display_title']
+                            liked_count = item['note_card']['interact_info']['liked_count']
+                            url = f'https://www.xiaohongshu.com/explore/{item["id"]}?xsec_token={item["xsec_token"]}'
+                            
+                            results.append({
+                                "index": i,
+                                "title": title,
+                                "liked_count": liked_count,
+                                "url": url
+                            })
+                    
+                    # 成功找到结果
+                    result_data = {
+                        "success": True,
+                        "message": f"成功找到 {len(results)} 条与「{keywords}」相关的笔记",
+                        "keywords": keywords,
+                        "results": results,
+                        "total_count": len(results)
+                    }
+                    
+                    logger.info(f"✅ 搜索完成: {keywords} - 找到{len(results)}条结果")
+                    return json.dumps(result_data, ensure_ascii=False, indent=2)
+                else:
+                    # 检查是否是cookie问题
+                    cookie_status = await self.xhs_api_adapter.check_cookie()
+                    if "有效" in cookie_status:
+                        # Cookie有效但没找到结果
+                        result_data = {
+                            "success": True,
+                            "message": f"未找到与「{keywords}」相关的笔记",
+                            "keywords": keywords,
+                            "results": [],
+                            "total_count": 0
+                        }
+                    else:
+                        # Cookie无效
+                        result_data = {
+                            "success": False,
+                            "message": "搜索失败：登录状态无效",
+                            "keywords": keywords,
+                            "error_message": "需要重新登录小红书",
+                            "suggestion": "请先运行登录工具：login_xiaohongshu()"
+                        }
+                    
+                    logger.warning(f"⚠️ 搜索无结果或Cookie失效: {keywords}")
+                    return json.dumps(result_data, ensure_ascii=False, indent=2)
+                    
+            except Exception as e:
+                error_msg = f"搜索笔记过程出错: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                return json.dumps({
+                    "success": False,
+                    "message": "搜索笔记失败",
+                    "keywords": keywords,
+                    "error_message": error_msg,
+                    "suggestion": "请检查网络连接或稍后重试"
+                }, ensure_ascii=False, indent=2)
+
+        @self.mcp.tool()
+        async def get_note_content(url: str) -> str:
+            """
+            获取笔记内容，参数url要带上xsec_token
+            
+            这个工具可以获取指定小红书笔记的详细内容，包括标题、作者信息、发布时间、
+            互动数据（点赞、评论、收藏）以及笔记正文内容。需要提供包含xsec_token的完整URL。
+            
+            Args:
+                url (str): 笔记URL，必须包含xsec_token参数
+                          格式：https://www.xiaohongshu.com/explore/{note_id}?xsec_token={token}
+                          可以从search_notes的结果中获取此格式的URL
+            
+            Returns:
+                str: 笔记内容的JSON字符串，包含以下信息：
+                    - success: 获取是否成功
+                    - message: 结果描述信息
+                    - note_info: 笔记信息（如果成功），包含：
+                        * title: 笔记标题
+                        * author: 作者昵称
+                        * publish_time: 发布时间
+                        * liked_count: 点赞数
+                        * comment_count: 评论数
+                        * collected_count: 收藏数
+                        * content: 笔记正文内容
+                        * cover_image: 封面图片URL
+                        * url: 笔记链接
+                    - error_message: 错误信息（如果失败）
+                        
+            示例:
+                get_note_content("https://www.xiaohongshu.com/explore/123456?xsec_token=abc123")
+            """
+            logger.info(f"📄 收到获取笔记内容请求: {url}")
+            
+            try:
+                # 基本URL验证
+                if not url or not isinstance(url, str):
+                    return json.dumps({
+                        "success": False,
+                        "message": "URL不能为空且必须是字符串",
+                        "error_message": "无效的URL参数"
+                    }, ensure_ascii=False, indent=2)
+                
+                # 检查是否为小红书URL
+                if "xiaohongshu.com" not in url and "xhslink.com" not in url:
+                    return json.dumps({
+                        "success": False,
+                        "message": "只支持小红书官方链接",
+                        "url": url,
+                        "error_message": "URL必须包含xiaohongshu.com或xhslink.com"
+                    }, ensure_ascii=False, indent=2)
+                
+                # 提取note_id和xsec_token
+                params = self.xhs_api_adapter.get_nodeid_token(url=url)
+                note_id = params.get("note_id")
+                xsec_token = params.get("xsec_token")
+                
+                if not note_id:
+                    return json.dumps({
+                        "success": False,
+                        "message": "无法从URL中提取笔记ID",
+                        "url": url,
+                        "error_message": "URL格式不正确"
+                    }, ensure_ascii=False, indent=2)
+                
+                if not xsec_token:
+                    return json.dumps({
+                        "success": False,
+                        "message": "URL中缺少xsec_token参数",
+                        "url": url,
+                        "error_message": "需要包含xsec_token的完整URL",
+                        "suggestion": "请使用search_notes获取包含xsec_token的URL"
+                    }, ensure_ascii=False, indent=2)
+                
+                # 调用API获取笔记内容
+                data = await self.xhs_api_adapter.get_note_content(note_id, xsec_token)
+                
+                # 处理返回结果
+                if 'data' in data and 'items' in data['data'] and len(data['data']['items']) > 0:
+                    item = data['data']['items'][0]
+                    
+                    if 'note_card' in item and 'user' in item['note_card']:
+                        note_card = item['note_card']
+                        
+                        # 提取封面图片
+                        cover = ''
+                        if 'image_list' in note_card and len(note_card['image_list']) > 0:
+                            if note_card['image_list'][0].get('url_pre'):
+                                cover = note_card['image_list'][0]['url_pre']
+                        
+                        # 格式化发布时间
+                        publish_time = "未知时间"
+                        if note_card.get('time'):
+                            try:
+                                timestamp = note_card.get('time', 0) / 1000
+                                publish_time = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                            except:
+                                publish_time = "时间格式错误"
+                        
+                        # 提取互动数据
+                        interact_info = note_card.get('interact_info', {})
+                        liked_count = interact_info.get('liked_count', 0)
+                        comment_count = interact_info.get('comment_count', 0)
+                        collected_count = interact_info.get('collected_count', 0)
+                        
+                        # 构建笔记信息
+                        note_info = {
+                            "title": note_card.get('title', ''),
+                            "author": note_card['user'].get('nickname', ''),
+                            "publish_time": publish_time,
+                            "liked_count": liked_count,
+                            "comment_count": comment_count,
+                            "collected_count": collected_count,
+                            "content": note_card.get('desc', ''),
+                            "cover_image": cover,
+                            "url": url
+                        }
+                        
+                        result_data = {
+                            "success": True,
+                            "message": f"成功获取笔记内容：{note_info['title']}",
+                            "note_info": note_info
+                        }
+                        
+                        logger.info(f"✅ 获取笔记内容成功: {note_info['title']}")
+                        return json.dumps(result_data, ensure_ascii=False, indent=2)
+                    else:
+                        logger.warning("⚠️ 返回数据结构异常")
+                        return json.dumps({
+                            "success": False,
+                            "message": "笔记数据结构异常",
+                            "url": url,
+                            "error_message": "API返回数据格式不正确"
+                        }, ensure_ascii=False, indent=2)
+                else:
+                    # 检查是否是cookie问题
+                    cookie_status = await self.xhs_api_adapter.check_cookie()
+                    if "有效" in cookie_status:
+                        error_msg = "获取笔记内容失败，可能是笔记不存在或已被删除"
+                    else:
+                        error_msg = "获取笔记内容失败：登录状态无效"
+                    
+                    logger.warning(f"⚠️ 获取笔记内容失败: {url}")
+                    return json.dumps({
+                        "success": False,
+                        "message": error_msg,
+                        "url": url,
+                        "error_message": "无法获取笔记内容",
+                        "suggestion": "请检查URL是否正确或重新登录"
+                    }, ensure_ascii=False, indent=2)
+                    
+            except Exception as e:
+                error_msg = f"获取笔记内容过程出错: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                return json.dumps({
+                    "success": False,
+                    "message": "获取笔记内容失败",
+                    "url": url,
+                    "error_message": error_msg,
+                    "suggestion": "请检查URL格式和网络连接"
+                }, ensure_ascii=False, indent=2)
+
+        @self.mcp.tool()
+        async def get_note_comments(url: str) -> str:
+            """
+            获取笔记评论，参数url要带上xsec_token
+            
+            这个工具可以获取指定小红书笔记的评论列表，包括评论内容、评论者信息和发布时间。
+            需要提供包含xsec_token的完整URL。
+            
+            Args:
+                url (str): 笔记URL，必须包含xsec_token参数
+                          格式：https://www.xiaohongshu.com/explore/{note_id}?xsec_token={token}
+                          可以从search_notes的结果中获取此格式的URL
+            
+            Returns:
+                str: 评论数据的JSON字符串，包含以下信息：
+                    - success: 获取是否成功
+                    - message: 结果描述信息
+                    - comments: 评论列表（如果成功），每个评论包含：
+                        * index: 评论序号
+                        * author: 评论者昵称
+                        * content: 评论内容
+                        * create_time: 发布时间
+                    - total_count: 评论总数
+                    - error_message: 错误信息（如果失败）
+                        
+            示例:
+                get_note_comments("https://www.xiaohongshu.com/explore/123456?xsec_token=abc123")
+            """
+            logger.info(f"💬 收到获取笔记评论请求: {url}")
+            
+            try:
+                # 基本URL验证
+                if not url or not isinstance(url, str):
+                    return json.dumps({
+                        "success": False,
+                        "message": "URL不能为空且必须是字符串",
+                        "error_message": "无效的URL参数"
+                    }, ensure_ascii=False, indent=2)
+                
+                # 检查是否为小红书URL
+                if "xiaohongshu.com" not in url and "xhslink.com" not in url:
+                    return json.dumps({
+                        "success": False,
+                        "message": "只支持小红书官方链接",
+                        "url": url,
+                        "error_message": "URL必须包含xiaohongshu.com或xhslink.com"
+                    }, ensure_ascii=False, indent=2)
+                
+                # 提取note_id和xsec_token
+                params = self.xhs_api_adapter.get_nodeid_token(url=url)
+                note_id = params.get("note_id")
+                xsec_token = params.get("xsec_token")
+                
+                if not note_id:
+                    return json.dumps({
+                        "success": False,
+                        "message": "无法从URL中提取笔记ID",
+                        "url": url,
+                        "error_message": "URL格式不正确"
+                    }, ensure_ascii=False, indent=2)
+                
+                if not xsec_token:
+                    return json.dumps({
+                        "success": False,
+                        "message": "URL中缺少xsec_token参数",
+                        "url": url,
+                        "error_message": "需要包含xsec_token的完整URL",
+                        "suggestion": "请使用search_notes获取包含xsec_token的URL"
+                    }, ensure_ascii=False, indent=2)
+                
+                # 调用API获取笔记评论
+                data = await self.xhs_api_adapter.get_note_comments(note_id, xsec_token)
+                
+                # 处理返回结果
+                comments = []
+                if 'data' in data and 'comments' in data['data'] and len(data['data']['comments']) > 0:
+                    for i, comment in enumerate(data['data']['comments']):
+                        # 格式化评论时间
+                        create_time = "未知时间"
+                        if comment.get('create_time'):
+                            try:
+                                timestamp = comment['create_time'] / 1000
+                                create_time = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                            except:
+                                create_time = "时间格式错误"
+                        
+                        comment_info = {
+                            "index": i,
+                            "author": comment['user_info'].get('nickname', '匿名用户'),
+                            "content": comment.get('content', ''),
+                            "create_time": create_time
+                        }
+                        
+                        comments.append(comment_info)
+                    
+                    result_data = {
+                        "success": True,
+                        "message": f"成功获取到 {len(comments)} 条评论",
+                        "comments": comments,
+                        "total_count": len(comments),
+                        "url": url
+                    }
+                    
+                    logger.info(f"✅ 获取笔记评论成功: 共{len(comments)}条评论")
+                    return json.dumps(result_data, ensure_ascii=False, indent=2)
+                else:
+                    # 检查是否是cookie问题
+                    cookie_status = await self.xhs_api_adapter.check_cookie()
+                    if "有效" in cookie_status:
+                        result_data = {
+                            "success": True,
+                            "message": "该笔记暂无评论",
+                            "comments": [],
+                            "total_count": 0,
+                            "url": url
+                        }
+                    else:
+                        result_data = {
+                            "success": False,
+                            "message": "获取评论失败：登录状态无效",
+                            "url": url,
+                            "error_message": "需要重新登录小红书",
+                            "suggestion": "请先运行登录工具：login_xiaohongshu()"
+                        }
+                    
+                    logger.info(f"ℹ️ 获取笔记评论: 无评论或需要登录")
+                    return json.dumps(result_data, ensure_ascii=False, indent=2)
+                    
+            except Exception as e:
+                error_msg = f"获取笔记评论过程出错: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                return json.dumps({
+                    "success": False,
+                    "message": "获取笔记评论失败",
+                    "url": url,
+                    "error_message": error_msg,
+                    "suggestion": "请检查URL格式和网络连接"
+                }, ensure_ascii=False, indent=2)
+
 
     async def _execute_publish_task(self, task_id: str) -> None:
         """
@@ -911,7 +1326,7 @@ class MCPServer:
         logger.info(f"🎯 MCP工具列表:")
         for tool in ["test_connection", "smart_publish_note", "check_task_status",
                      "get_task_result", "login_xiaohongshu", "get_creator_data_analysis",
-                     "parse_xiaohongshu_url"]:
+                     "parse_xiaohongshu_url", "search_notes", "get_note_content", "get_note_comments"]:
             logger.info(f"   • {tool}")
 
         # 初始化数据采集（如果启用）
@@ -978,6 +1393,9 @@ class MCPServer:
         logger.info("   • login_xiaohongshu - 智能登录小红书")
         logger.info("   • get_creator_data_analysis - 获取创作者数据用于分析")
         logger.info("   • parse_xiaohongshu_url - 解析小红书URL，提取页面内容")
+        logger.info("   • search_notes - 根据关键词搜索笔记")
+        logger.info("   • get_note_content - 获取笔记内容（需要xsec_token）")
+        logger.info("   • get_note_comments - 获取笔记评论（需要xsec_token）")
 
         logger.info("🔧 按 Ctrl+C 停止服务器")
         logger.info("💡 终止时的ASGI错误信息是正常现象，可以忽略")

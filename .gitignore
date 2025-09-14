@@ -91,3 +91,6 @@ data/creator_db/
 .cursorignore
 chrome-mac-x64
 chrome-mac-arm64
+
+# Ignore xhs-mcp directory
+xhs-mcp/
