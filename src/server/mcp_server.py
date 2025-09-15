@@ -1384,6 +1384,13 @@ class MCPServer:
         logger.info(f"   • http://localhost:{self.config.server_port}/sse (本机)")
         if local_ip != "未知":
             logger.info(f"   • http://{local_ip}:{self.config.server_port}/sse (内网)")
+            logger.info(f"   • http://{local_ip}:{self.config.server_port}/sse (Docker容器访问)")
+        
+        logger.info("🔧 在n8n中配置:")
+        if local_ip != "未知":
+            logger.info(f"   MCP Server URL: http://{local_ip}:{self.config.server_port}/sse")
+        else:
+            logger.info(f"   MCP Server URL: http://localhost:{self.config.server_port}/sse")
 
         logger.info("🎯 MCP工具列表:")
         logger.info("   • test_connection - 测试MCP连接")
@@ -1396,6 +1403,12 @@ class MCPServer:
         logger.info("   • search_notes - 根据关键词搜索笔记")
         logger.info("   • get_note_content - 获取笔记内容（需要xsec_token）")
         logger.info("   • get_note_comments - 获取笔记评论（需要xsec_token）")
+
+        logger.info("💡 新功能使用流程:")
+        logger.info("   1. search_notes('关键词') -> 获取笔记列表")
+        logger.info("   2. 从结果中获取带xsec_token的URL")
+        logger.info("   3. get_note_content(url) -> 获取详细内容")
+        logger.info("   4. get_note_comments(url) -> 获取评论列表")
 
         logger.info("🔧 按 Ctrl+C 停止服务器")
         logger.info("💡 终止时的ASGI错误信息是正常现象，可以忽略")
