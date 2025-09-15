@@ -144,15 +144,41 @@ class MCPServer:
             import os
             logger.info("📊 初始化数据采集功能...")
 
-            # 检查cookies是否存在，数据采集需要登录状态
-            cookies = self.xhs_client.cookie_manager.load_cookies()
-            if not cookies:
-                logger.warning("⚠️ 未找到cookies文件，跳过数据采集功能初始化")
+            # 检查cookies状态（统一管理的双站点cookies）
+            cookie_status = self.xhs_client.cookie_manager.check_cookies_status()
+            
+            logger.info("🍪 Cookie状态检查:")
+            logger.info(f"   📄 文件格式版本: v{cookie_status['file_version']}")
+            
+            # 创作者站cookies状态
+            creator_status = cookie_status['creator']
+            if creator_status['exists']:
+                logger.info(f"   ✅ 创作者站: {creator_status['count']} cookies ({creator_status['critical_count']} 关键)")
+            else:
+                logger.warning("   ❌ 创作者站: 未找到cookies")
+            
+            # 主站cookies状态  
+            main_status = cookie_status['main']
+            if main_status['exists']:
+                logger.info(f"   ✅ 主站: {main_status['count']} cookies ({main_status['critical_count']} 关键)")
+            else:
+                logger.warning("   ❌ 主站: 未找到cookies")
+            
+            # 总体状态评估
+            total_cookies = creator_status['count'] + main_status['count']
+            if total_cookies == 0:
+                logger.warning("⚠️ 未找到任何cookies文件，跳过数据采集功能初始化")
                 logger.info("💡 数据采集需要登录状态，请先运行: python xhs_toolkit.py cookie save")
                 self.scheduler_initialized = False
                 return
-
-            logger.info(f"✅ 检测到 {len(cookies)} 个cookies，可以进行数据采集")
+            
+            logger.info(f"✅ 检测到 {total_cookies} 个cookies，可以进行数据采集")
+            
+            # 功能可用性提示
+            if creator_status['exists']:
+                logger.info("   🎯 可用功能: 内容发布、数据采集、创作者分析")
+            if main_status['exists']:
+                logger.info("   🔍 可用功能: 内容搜索、笔记获取、评论获取")
 
             # 初始化存储管理器
             storage_manager.initialize()

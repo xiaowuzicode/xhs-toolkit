@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 
 class CookieManager:
-    """Cookie管理器"""
+    """统一Cookie管理器 - 支持主站和创作者站"""
     
     def __init__(self, config: XHSConfig):
         """
@@ -31,6 +31,9 @@ class CookieManager:
         """
         self.config = config
         self.browser_manager = ChromeDriverManager(config)
+        # Cookie站点类型
+        self.CREATOR_SITE = "creator"
+        self.MAIN_SITE = "main"
     
     @handle_exception
     def save_cookies_interactive(self) -> bool:
@@ -528,13 +531,14 @@ class CookieManager:
             "total_cookies": len(cookies)
         }
     
-    def _save_cookies_to_file(self, cookies: List[Dict[str, Any]], validation_result: Dict[str, Any]) -> bool:
+    def _save_cookies_to_file(self, cookies: List[Dict[str, Any]], validation_result: Dict[str, Any], site_type: str = "creator") -> bool:
         """
-        保存cookies到文件
+        保存cookies到文件（支持双站点格式v3.0）
         
         Args:
             cookies: Cookie列表
             validation_result: 验证结果
+            site_type: 站点类型 ("creator" 或 "main")
             
         Returns:
             是否保存成功
@@ -548,19 +552,58 @@ class CookieManager:
             cookies_dir.mkdir(parents=True, exist_ok=True)
             logger.info("✅ cookies目录创建成功")
             
-            # 构建新格式的cookies数据
-            logger.info("📦 构建cookies数据结构...")
-            cookies_data = {
+            # 读取现有数据（如果存在）
+            cookies_file = Path(self.config.cookies_file)
+            existing_data = {}
+            if cookies_file.exists():
+                try:
+                    with open(cookies_file, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                    logger.info("📖 读取现有cookies文件成功")
+                except Exception as e:
+                    logger.warning(f"⚠️ 读取现有cookies文件失败，将创建新文件: {e}")
+                    existing_data = {}
+            
+            # 构建v3.0格式的cookies数据结构
+            logger.info("📦 构建v3.0格式cookies数据结构...")
+            
+            # 确定站点domain
+            domain = 'creator.xiaohongshu.com' if site_type == 'creator' else 'www.xiaohongshu.com'
+            
+            # 构建站点专用的cookies数据
+            site_cookies_data = {
                 'cookies': cookies,
                 'saved_at': datetime.now().isoformat(),
-                'domain': 'creator.xiaohongshu.com',  # 标记为创作者中心cookies
+                'domain': domain,
                 'critical_cookies_found': validation_result["found_critical"],
-                'version': '2.0'  # 版本标记
+                'total_cookies': len(cookies)
             }
-            logger.info(f"📦 数据结构构建完成，包含 {len(cookies)} 个cookies")
+            
+            # 构建完整的v3.0数据结构
+            if existing_data.get('version') == '3.0':
+                # 更新现有v3.0格式
+                cookies_data = existing_data
+            else:
+                # 创建新的v3.0格式或从旧格式迁移
+                cookies_data = {
+                    'version': '3.0',
+                    'last_updated': datetime.now().isoformat(),
+                    'creator_cookies': existing_data if existing_data.get('version') == '2.0' and existing_data.get('domain') == 'creator.xiaohongshu.com' else {},
+                    'main_site_cookies': {}
+                }
+            
+            # 更新对应站点的cookies
+            if site_type == 'creator' or site_type == self.CREATOR_SITE:
+                cookies_data['creator_cookies'] = site_cookies_data
+                logger.info(f"📦 更新创作者站cookies: {len(cookies)} 个")
+            elif site_type == 'main' or site_type == self.MAIN_SITE:
+                cookies_data['main_site_cookies'] = site_cookies_data
+                logger.info(f"📦 更新主站cookies: {len(cookies)} 个")
+            
+            cookies_data['last_updated'] = datetime.now().isoformat()
+            logger.info(f"📦 v3.0数据结构构建完成")
             
             # 保存cookies
-            cookies_file = Path(self.config.cookies_file)
             logger.info(f"💾 准备写入文件: {cookies_file}")
             
             with open(cookies_file, 'w', encoding='utf-8') as f:
@@ -569,10 +612,14 @@ class CookieManager:
             # 验证文件是否成功写入
             if cookies_file.exists():
                 file_size = cookies_file.stat().st_size
-                logger.info(f"✅ 文件写入成功: {cookies_file}")
+                logger.info(f"✅ v3.0格式cookies文件写入成功: {cookies_file}")
                 logger.info(f"📊 文件大小: {file_size} 字节")
-                logger.info(f"📊 共保存了 {len(cookies)} 个cookies")
-                logger.info(f"🔑 关键创作者cookies: {len(validation_result['found_critical'])}/{len(CRITICAL_CREATOR_COOKIES)}")
+                logger.info(f"📊 {site_type}站点保存了 {len(cookies)} 个cookies")
+                
+                # 显示站点特定的cookie信息
+                site_name = "创作者站" if site_type in ['creator', self.CREATOR_SITE] else "主站"
+                logger.info(f"🎯 {site_name}域名: {domain}")
+                logger.info(f"🔑 关键cookies: {len(validation_result['found_critical'])} 个")
                 
                 # 显示关键cookies列表
                 if validation_result['found_critical']:
@@ -597,16 +644,23 @@ class CookieManager:
             return False
     
     @handle_exception
-    def load_cookies(self) -> List[Dict[str, Any]]:
+    def load_cookies(self, site_type: str = None) -> List[Dict[str, Any]]:
         """
-        加载cookies - 支持新旧格式兼容
+        加载cookies - 支持主站和创作者站，兼容新旧格式
         
+        Args:
+            site_type: 站点类型 ('creator', 'main', None=创作者站兼容)
+            
         Returns:
             Cookie列表
             
         Raises:
             AuthenticationError: 当加载失败时
         """
+        # 默认为创作者站（向后兼容）
+        if site_type is None:
+            site_type = self.CREATOR_SITE
+            
         cookies_file = Path(self.config.cookies_file)
         
         if not cookies_file.exists():
@@ -629,7 +683,26 @@ class CookieManager:
                 domain = cookies_data.get('domain', 'unknown')
                 logger.debug(f"检测到新版本cookies格式，版本: {version}, 域名: {domain}")
             
-            logger.debug(f"成功加载 {len(cookies)} 个cookies")
+            # 新格式v3.0：支持双站点
+            if version == '3.0' or 'creator_cookies' in cookies_data or 'main_site_cookies' in cookies_data:
+                if site_type == self.CREATOR_SITE:
+                    cookies = cookies_data.get('creator_cookies', {}).get('cookies', [])
+                    logger.debug(f"加载创作者站cookies: {len(cookies)} 个")
+                elif site_type == self.MAIN_SITE:
+                    cookies = cookies_data.get('main_site_cookies', {}).get('cookies', [])
+                    logger.debug(f"加载主站cookies: {len(cookies)} 个")
+                else:
+                    # 默认返回创作者站
+                    cookies = cookies_data.get('creator_cookies', {}).get('cookies', [])
+                    logger.debug(f"默认加载创作者站cookies: {len(cookies)} 个")
+            else:
+                # v2.0格式：单一站点（创作者站）
+                logger.debug(f"检测到v2.0格式，域名: {domain}")
+                if site_type == self.MAIN_SITE:
+                    logger.warning("⚠️ 请求主站cookies但文件格式为v2.0（仅支持创作者站）")
+                    return []
+                
+            logger.debug(f"成功加载 {len(cookies)} 个 {site_type} cookies")
             return cookies
             
         except Exception as e:
@@ -821,6 +894,190 @@ class CookieManager:
         finally:
             # 确保浏览器被关闭
             self.browser_manager.close_driver()
+
+
+    @handle_exception 
+    def save_main_site_cookies_interactive(self) -> bool:
+        """
+        交互式保存主站cookies
+        
+        Returns:
+            是否成功保存cookies
+            
+        Raises:
+            AuthenticationError: 当保存过程出错时
+        """
+        logger.info("🌐 开始获取小红书主站Cookies...")
+        logger.info("📝 注意：将跳转到主站，确保获取完整的用户权限cookies")
+        
+        try:
+            # 创建浏览器驱动
+            driver = self.browser_manager.create_driver()
+            
+            # 导航到主站
+            logger.info("🌐 正在访问小红书主站...")
+            driver.get("https://www.xiaohongshu.com")
+            time.sleep(3)
+            
+            logger.info("\n📋 请按照以下步骤操作:")
+            logger.info("1. 在浏览器中手动登录小红书主站")
+            logger.info("2. 登录成功后，确保能正常浏览内容")
+            logger.info("3. 建议进行一些搜索操作，确认账号状态正常")
+            logger.info("4. 完成后，在此终端中按 Enter 键继续...")
+            
+            input()  # 等待用户输入
+            
+            logger.info("🍪 开始获取主站cookies...")
+            cookies = driver.get_cookies()
+            
+            if not cookies:
+                raise AuthenticationError("未获取到任何cookies", auth_type="cookie_fetch")
+                
+            logger.info(f"✅ 获取到 {len(cookies)} 个cookies")
+            
+            # 验证主站cookies
+            validation_result = self._validate_main_site_cookies(cookies)
+            logger.info(f"🔍 主站cookies验证: {validation_result['found_critical']} 个关键cookies")
+            
+            # 保存cookies
+            save_result = self._save_cookies_to_file(cookies, validation_result, self.MAIN_SITE)
+            
+            if save_result:
+                logger.info("\n🎉 主站Cookies获取成功！")
+                logger.info("💡 现在可以正常使用搜索和内容获取功能了")
+                return True
+            else:
+                raise AuthenticationError("主站Cookies保存失败", auth_type="cookie_save")
+                
+        except Exception as e:
+            if isinstance(e, AuthenticationError):
+                raise
+            else:
+                raise AuthenticationError(f"获取主站cookies过程出错: {str(e)}", auth_type="cookie_save") from e
+        finally:
+            # 确保浏览器被关闭
+            logger.info("🔒 正在关闭浏览器...")
+            try:
+                self.browser_manager.close_driver()
+                logger.info("✅ 浏览器已关闭")
+            except Exception as e:
+                logger.warning(f"⚠️ 关闭浏览器时出错: {e}")
+    
+    def _validate_main_site_cookies(self, cookies: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        验证主站cookies的有效性
+        
+        Args:
+            cookies: Cookie列表
+            
+        Returns:
+            验证结果字典
+        """
+        # 主站关键cookies
+        CRITICAL_MAIN_COOKIES = [
+            'web_session', 'a1', 'webId', 'gid', 'xsecappid'
+        ]
+        
+        cookie_names = {cookie.get('name') for cookie in cookies if cookie.get('name')}
+        found_critical = [name for name in CRITICAL_MAIN_COOKIES if name in cookie_names]
+        missing_critical = [name for name in CRITICAL_MAIN_COOKIES if name not in cookie_names]
+        
+        logger.info(f"🔍 主站cookies验证:")
+        logger.info(f"   📊 总cookies: {len(cookies)}")
+        logger.info(f"   ✅ 关键cookies: {len(found_critical)}/{len(CRITICAL_MAIN_COOKIES)}")
+        
+        if found_critical:
+            logger.info(f"   🔑 已找到: {found_critical}")
+        if missing_critical:
+            logger.warning(f"   ⚠️ 缺失: {missing_critical}")
+        
+        return {
+            "found_critical": found_critical,
+            "missing_critical": missing_critical,
+            "total_cookies": len(cookies)
+        }
+    
+    def get_cookie_string(self, site_type: str = "creator") -> str:
+        """
+        获取指定站点的cookie字符串格式
+        
+        Args:
+            site_type: 站点类型 ("creator" 或 "main")
+            
+        Returns:
+            Cookie字符串
+        """
+        try:
+            cookies = self.load_cookies(site_type)
+            if not cookies:
+                logger.warning(f"⚠️ 未找到{site_type}站点的cookies")
+                return ""
+            
+            cookie_pairs = []
+            for cookie in cookies:
+                name = cookie.get('name')
+                value = cookie.get('value')
+                if name and value:
+                    cookie_pairs.append(f"{name}={value}")
+            
+            cookie_string = "; ".join(cookie_pairs)
+            logger.debug(f"📋 {site_type}站点cookie字符串: {len(cookie_string)} 字符")
+            return cookie_string
+            
+        except Exception as e:
+            logger.error(f"❌ 获取{site_type}站点cookie字符串失败: {e}")
+            return ""
+
+    def check_cookies_status(self) -> Dict[str, Any]:
+        """
+        检查所有站点的cookies状态
+        
+        Returns:
+            包含各站点cookies状态的字典
+        """
+        status = {
+            "creator": {"exists": False, "count": 0, "critical_count": 0},
+            "main": {"exists": False, "count": 0, "critical_count": 0},
+            "file_version": "unknown"
+        }
+        
+        cookies_file = Path(self.config.cookies_file)
+        if not cookies_file.exists():
+            return status
+            
+        try:
+            with open(cookies_file, 'r', encoding='utf-8') as f:
+                cookies_data = json.load(f)
+            
+            version = cookies_data.get('version', '1.0')
+            status["file_version"] = version
+            
+            if version == '3.0':
+                # v3.0格式
+                creator_data = cookies_data.get('creator_cookies', {})
+                main_data = cookies_data.get('main_site_cookies', {})
+                
+                if creator_data.get('cookies'):
+                    status["creator"]["exists"] = True
+                    status["creator"]["count"] = len(creator_data['cookies'])
+                    status["creator"]["critical_count"] = len(creator_data.get('critical_cookies_found', []))
+                
+                if main_data.get('cookies'):
+                    status["main"]["exists"] = True
+                    status["main"]["count"] = len(main_data['cookies'])
+                    status["main"]["critical_count"] = len(main_data.get('critical_cookies_found', []))
+            else:
+                # 旧格式，假设为创作者站
+                cookies = cookies_data.get('cookies', [])
+                if cookies:
+                    status["creator"]["exists"] = True
+                    status["creator"]["count"] = len(cookies)
+                    status["creator"]["critical_count"] = len(cookies_data.get('critical_cookies_found', []))
+            
+        except Exception as e:
+            logger.error(f"❌ 检查cookies状态失败: {e}")
+        
+        return status
 
 
 # 便捷函数

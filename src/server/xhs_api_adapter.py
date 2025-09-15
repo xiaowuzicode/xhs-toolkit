@@ -167,16 +167,15 @@ class XhsApiAdapter:
             Cookie 字符串
         """
         try:
-            # 使用现有的 cookie 管理器加载 cookies (creator后台)
+            # 使用统一cookie管理器获取创作者站cookies
             from ..auth.cookie_manager import CookieManager
             cookie_manager = CookieManager(self.config)
-            cookies_list = cookie_manager.load_cookies()
+            cookie_string = cookie_manager.get_cookie_string("creator")
             
-            if not cookies_list:
-                logger.warning("未找到创作者后台的 cookies")
+            if not cookie_string:
+                logger.warning("⚠️ 创作者站cookies为空，请先登录创作者中心")
                 return ""
             
-            cookie_string = self._cookies_list_to_string(cookies_list)
             logger.debug(f"获取到创作者cookie字符串长度: {len(cookie_string)}")
             return cookie_string
             
@@ -192,7 +191,16 @@ class XhsApiAdapter:
             Cookie 字符串
         """
         try:
-            # 首先尝试从环境变量获取主站cookies
+            # 优先使用统一cookie管理器获取主站cookies
+            from ..auth.cookie_manager import CookieManager
+            cookie_manager = CookieManager(self.config)
+            cookie_string = cookie_manager.get_cookie_string("main")
+            
+            if cookie_string:
+                logger.debug("使用cookie管理器中的主站cookies")
+                return cookie_string
+            
+            # 向后兼容：尝试从环境变量获取主站cookies
             import os
             env_cookie = os.getenv('XHS_MAIN_COOKIE')
             if env_cookie:
@@ -206,7 +214,7 @@ class XhsApiAdapter:
                 return env_cookie
             
             # 最后尝试使用创作者cookie（向后兼容）
-            logger.warning("未找到主站cookies，尝试使用创作者cookies")
+            logger.warning("⚠️ 未找到主站cookies，尝试使用创作者cookies")
             return self._get_creator_cookie_string()
             
         except Exception as e:
