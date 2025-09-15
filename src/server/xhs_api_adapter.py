@@ -43,7 +43,8 @@ class XhsApiAdapter:
             config: 配置管理器实例
         """
         self.config = config
-        self._base_url = "https://edith.xiaohongshu.com"
+        self._base_url = "https://edith.xiaohongshu.com" 
+        # 使用与原始xhs-mcp完全相同的headers
         self._headers = {
             'content-type': 'application/json;charset=UTF-8',
             'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
@@ -124,8 +125,24 @@ class XhsApiAdapter:
         if headers is None:
             headers = {}
         
-        # 获取 cookie 字符串
-        cookie_string = self._get_current_cookie_string()
+        # 合并默认headers
+        merged_headers = self._headers.copy()
+        merged_headers.update(headers)
+        
+        # 根据API类型选择合适的cookie
+        if uri in ["/api/sns/web/v1/search/notes", "/api/sns/web/v1/feed", "/api/sns/web/v2/comment/page"]:
+            # 搜索和内容相关API使用主站cookies
+            cookie_string = self._get_main_site_cookie_string()
+            logger.info("🔍 搜索相关API，使用主站cookies")
+        else:
+            # 其他API使用创作者cookies（保持原有功能）
+            cookie_string = self._get_creator_cookie_string()
+            logger.info("✍️ 创作者功能API，使用创作者cookies")
+        
+        logger.info(f"请求URL: {self._base_url}{uri}")
+        logger.info(f"请求方法: {method}")
+        logger.info(f"请求头: {merged_headers}")
+        logger.info(f"Cookie前50字符: {cookie_string[:50]}...")
         
         response: Response = await session.request(
             method=method,
@@ -135,36 +152,76 @@ class XhsApiAdapter:
             cookies=self._parse_cookie(cookie_string),
             quote=False,
             stream=True,
-            headers=headers
+            headers=merged_headers
         )
         
         content = await response.acontent()
+        logger.info(f"响应状态码: {response.status_code}")
         return json.loads(content)
     
-    def _get_current_cookie_string(self) -> str:
+    def _get_creator_cookie_string(self) -> str:
         """
-        从配置中获取当前的 cookie 字符串
+        获取创作者后台的 cookie 字符串（用于发布等功能）
         
         Returns:
             Cookie 字符串
         """
         try:
-            # 使用现有的 cookie 管理器加载 cookies
+            # 使用现有的 cookie 管理器加载 cookies (creator后台)
             from ..auth.cookie_manager import CookieManager
             cookie_manager = CookieManager(self.config)
             cookies_list = cookie_manager.load_cookies()
             
             if not cookies_list:
-                logger.warning("未找到有效的 cookies")
+                logger.warning("未找到创作者后台的 cookies")
                 return ""
             
             cookie_string = self._cookies_list_to_string(cookies_list)
-            logger.debug(f"获取到 cookie 字符串长度: {len(cookie_string)}")
+            logger.debug(f"获取到创作者cookie字符串长度: {len(cookie_string)}")
             return cookie_string
             
         except Exception as e:
-            logger.error(f"获取 cookie 失败: {e}")
+            logger.error(f"获取创作者cookie失败: {e}")
             return ""
+    
+    def _get_main_site_cookie_string(self) -> str:
+        """
+        获取主站的 cookie 字符串（用于搜索等功能）
+        
+        Returns:
+            Cookie 字符串
+        """
+        try:
+            # 首先尝试从环境变量获取主站cookies
+            import os
+            env_cookie = os.getenv('XHS_MAIN_COOKIE')
+            if env_cookie:
+                logger.debug("使用环境变量中的 XHS_MAIN_COOKIE")
+                return env_cookie
+            
+            # 如果没有专门的主站cookie，尝试使用通用的XHS_COOKIE
+            env_cookie = os.getenv('XHS_COOKIE')
+            if env_cookie:
+                logger.debug("使用环境变量中的 XHS_COOKIE 作为主站cookie")
+                return env_cookie
+            
+            # 最后尝试使用创作者cookie（向后兼容）
+            logger.warning("未找到主站cookies，尝试使用创作者cookies")
+            return self._get_creator_cookie_string()
+            
+        except Exception as e:
+            logger.error(f"获取主站cookie失败: {e}")
+            return ""
+    
+    def _get_current_cookie_string(self) -> str:
+        """
+        获取当前操作需要的 cookie 字符串（保持向后兼容）
+        
+        Returns:
+            Cookie 字符串
+        """
+        # 为了保持向后兼容，默认返回主站cookies
+        return self._get_main_site_cookie_string()
     
     def base36encode(self, number: Integral, alphabet: Iterable[str] = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ') -> str:
         """Base36 编码"""
@@ -291,6 +348,15 @@ class XhsApiAdapter:
             
             result = await self.request("/api/sns/web/v1/search/notes", method="POST", data=data)
             logger.info(f"搜索完成，关键词: {keywords}")
+            logger.info(f"API返回完整数据: {result}")
+            
+            # 检查API是否返回错误
+            if isinstance(result, dict):
+                if 'success' in result and not result['success']:
+                    logger.error(f"API返回错误: code={result.get('code')}, msg={result.get('msg')}")
+                elif 'code' in result and result['code'] != 0:
+                    logger.error(f"API返回错误代码: {result['code']}, msg={result.get('msg')}")
+            
             return result
             
         except Exception as e:

@@ -35,6 +35,9 @@ dependencies = [
     "loguru>=0.7.2",
     "apscheduler>=3.10.0",
     "beautifulsoup4>=4.13.5",
+    "curl-cffi>=0.13.0",
+    "pyexecjs>=1.5.1",
+    "webdriver-manager>=4.0.2",
 ]
 
 [project.optional-dependencies]

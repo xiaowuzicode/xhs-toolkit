@@ -15,6 +15,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from webdriver_manager.chrome import ChromeDriverManager
 
 from .config import XHSConfig
 from .exceptions import BrowserError, handle_exception
@@ -177,12 +178,20 @@ class ChromeDriverManager:
         service_args = []
         # 设置ChromeDriver路径
         chromedriver_path = self.config.chromedriver_path
-        if chromedriver_path:
-            logger.debug(f"使用ChromeDriver路径: {chromedriver_path}")
+        if chromedriver_path and os.path.exists(chromedriver_path):
+            logger.debug(f"使用指定的ChromeDriver路径: {chromedriver_path}")
             service = Service(executable_path=chromedriver_path, service_args=service_args)
         else:
-            logger.debug("使用系统PATH中的ChromeDriver")
-            service = Service(service_args=service_args)
+            logger.debug("使用webdriver-manager自动管理ChromeDriver")
+            try:
+                # 使用webdriver-manager自动下载和管理ChromeDriver
+                chromedriver_path = ChromeDriverManager().install()
+                logger.info(f"✅ ChromeDriver自动安装路径: {chromedriver_path}")
+                service = Service(executable_path=chromedriver_path, service_args=service_args)
+            except Exception as e:
+                logger.warning(f"⚠️ webdriver-manager安装失败: {e}")
+                logger.debug("尝试使用系统PATH中的ChromeDriver")
+                service = Service(service_args=service_args)
         
         return service
     
