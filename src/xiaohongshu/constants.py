@@ -32,6 +32,13 @@ class XHSSelectors:
     TITLE_INPUT = ".d-text"
     TITLE_INPUT_ALT = "[placeholder*='标题']"
     CONTENT_EDITOR = ".ql-editor"
+    CONTENT_EDITOR_ALT1 = "[placeholder*='输入正文内容']"
+    CONTENT_EDITOR_ALT2 = "[placeholder*='正文内容']"
+    CONTENT_EDITOR_ALT3 = ".public-DraftEditor-content"
+    CONTENT_EDITOR_ALT4 = "[contenteditable='true']"
+    CONTENT_EDITOR_ALT5 = ".DraftEditor-root .DraftEditor-editorContainer .public-DraftEditor-content"
+    CONTENT_EDITOR_ALT6 = "div[data-testid='note-content-editor']"
+    CONTENT_EDITOR_ALT7 = ".note-content-editor"
     
     # 发布按钮
     PUBLISH_BUTTON = ".publishBtn"
@@ -120,6 +127,47 @@ def get_publish_button_selectors() -> List[str]:
     return [
         XHSSelectors.PUBLISH_BUTTON,
         XHSSelectors.PUBLISH_BUTTON_ALT
+    ]
+
+
+def get_content_editor_selectors() -> List[str]:
+    """获取内容编辑器选择器列表，按优先级排序"""
+    return [
+        # 基于真实HTML DOM结构的精确选择器
+        ".tiptap.ProseMirror",  # 最精确的选择器
+        ".tiptap",  # TipTap编辑器
+        ".ProseMirror",  # ProseMirror编辑器
+        "div.tiptap[contenteditable='true']",
+        "div.ProseMirror[contenteditable='true']",
+        ".tiptap-container .tiptap",
+        ".editor-content .tiptap",
+        
+        # 基于contenteditable + role组合
+        "div[contenteditable='true'][role='textbox']",
+        "[contenteditable='true'][role='textbox'][translate='no']",
+        "[contenteditable='true'][tabindex='0'][role='textbox']",
+        
+        # 基于placeholder属性（备用）
+        "[data-placeholder*='输入正文描述']",
+        "[data-placeholder*='正文描述']",
+        
+        # 通用contenteditable选择器
+        ".tiptap-container [contenteditable='true']",
+        ".editor-content [contenteditable='true']",
+        "[contenteditable='true'][tabindex='0']",
+        "[role='textbox'][contenteditable='true']",
+        "div[contenteditable='true']",
+        "[contenteditable='true']",
+        
+        # 兜底选择器（原有的）
+        XHSSelectors.CONTENT_EDITOR,
+        XHSSelectors.CONTENT_EDITOR_ALT1,
+        XHSSelectors.CONTENT_EDITOR_ALT2,
+        XHSSelectors.CONTENT_EDITOR_ALT3,
+        XHSSelectors.CONTENT_EDITOR_ALT4,
+        XHSSelectors.CONTENT_EDITOR_ALT5,
+        XHSSelectors.CONTENT_EDITOR_ALT6,
+        XHSSelectors.CONTENT_EDITOR_ALT7
     ]
 
 

@@ -22,6 +22,7 @@ from ..utils.text_utils import clean_text_for_browser, truncate_text
 from ..utils.logger import get_logger
 from .models import XHSNote, XHSSearchResult, XHSUser, XHSPublishResult, XHSUrlParseResult
 from .components.content_filler import XHSContentFiller
+from .constants import get_content_editor_selectors
 from .constants import (XHSConfig)
 
 logger = get_logger(__name__)
@@ -444,15 +445,8 @@ class XHSClient:
         try:
             logger.info("📝 填写内容...")
             
-            # 尝试多个内容选择器
-            content_selectors = [
-                ".ql-editor",
-                "[placeholder*='内容']",
-                "[placeholder*='content']",
-                "textarea",
-                ".content-input",
-                ".editor"
-            ]
+            # 使用更新后的内容选择器（基于真实DOM结构）
+            content_selectors = get_content_editor_selectors()
             
             content_input = None
             for selector in content_selectors:
@@ -683,15 +677,8 @@ class XHSClient:
             if not title_input:
                 raise PublishError("无法找到标题输入框", publish_step="检查标题输入框")
             
-            # 检查内容输入框是否存在
-            content_selectors = [
-                ".ql-editor",
-                "[placeholder*='内容']",
-                "[placeholder*='content']",
-                "textarea",
-                ".content-input",
-                ".editor"
-            ]
+            # 检查内容输入框是否存在（使用更新后的选择器）
+            content_selectors = get_content_editor_selectors()
             
             content_input = None
             for selector in content_selectors:

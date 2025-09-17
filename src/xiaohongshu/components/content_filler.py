@@ -13,7 +13,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import TimeoutException
 
 from ..interfaces import IContentFiller, IBrowserManager
-from ..constants import (XHSConfig, XHSSelectors, get_title_input_selectors)
+from ..constants import (XHSConfig, XHSSelectors, get_title_input_selectors, get_content_editor_selectors)
 from ...core.exceptions import PublishError, handle_exception
 from ...utils.logger import get_logger
 from ...utils.text_utils import clean_text_for_browser
@@ -221,28 +221,99 @@ class XHSContentFiller(IContentFiller):
     
     async def _find_content_editor(self):
         """
-        查找内容编辑器
+        查找内容编辑器，尝试多个选择器
         
         Returns:
             内容编辑器元素，如果未找到返回None
         """
         driver = self.browser_manager.driver
-        wait = WebDriverWait(driver, XHSConfig.DEFAULT_WAIT_TIME)
+        wait = WebDriverWait(driver, 3)  # 减少等待时间以便快速尝试
         
+        # 首先输出页面调试信息
         try:
-            logger.debug(f"🔍 查找内容编辑器: {XHSSelectors.CONTENT_EDITOR}")
-            content_editor = wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, XHSSelectors.CONTENT_EDITOR))
-            )
+            logger.info("🔍 页面调试信息:")
             
-            if content_editor and content_editor.is_enabled():
-                logger.info("✅ 找到内容编辑器")
-                return content_editor
+            # 查找所有可能的编辑器相关元素
+            debug_selectors = [
+                "[contenteditable]",
+                "[role='textbox']", 
+                ".tiptap",
+                "[class*='tiptap']",
+                "[class*='editor']",
+                "[class*='Editor']",
+                "[placeholder*='内容']",
+                "[placeholder*='正文']"
+            ]
             
-        except TimeoutException:
-            logger.error("⏰ 内容编辑器查找超时")
+            for debug_selector in debug_selectors:
+                try:
+                    elements = driver.find_elements(By.CSS_SELECTOR, debug_selector)
+                    if elements:
+                        for i, elem in enumerate(elements[:3]):  # 只显示前3个
+                            logger.info(f"📊 找到元素 {debug_selector} [{i+1}]: class='{elem.get_attribute('class')}', "
+                                      f"tag='{elem.tag_name}', "
+                                      f"contenteditable='{elem.get_attribute('contenteditable')}', "
+                                      f"role='{elem.get_attribute('role')}', "
+                                      f"placeholder='{elem.get_attribute('placeholder')}'")
+                except Exception as e:
+                    logger.debug(f"调试选择器 {debug_selector} 出错: {e}")
         except Exception as e:
-            logger.error(f"⚠️ 内容编辑器查找错误: {e}")
+            logger.warning(f"页面调试信息获取失败: {e}")
+        
+        # 尝试多个选择器
+        for selector in get_content_editor_selectors():
+            try:
+                logger.info(f"🔍 尝试内容编辑器选择器: {selector}")
+                content_editor = wait.until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                )
+                
+                if content_editor and content_editor.is_enabled():
+                    logger.info(f"✅ 找到内容编辑器: {selector}")
+                    return content_editor
+                    
+            except TimeoutException:
+                logger.info(f"⏰ 内容编辑器选择器超时: {selector}")
+                continue
+            except Exception as e:
+                logger.info(f"⚠️ 内容编辑器选择器错误: {selector}, {e}")
+                continue
+        
+        # 如果所有选择器都失败，尝试JavaScript方式查找
+        try:
+            logger.info("🔄 使用JavaScript查找contenteditable元素...")
+            js_result = driver.execute_script("""
+                var editables = document.querySelectorAll('[contenteditable="true"]');
+                var result = [];
+                for (var i = 0; i < editables.length; i++) {
+                    var elem = editables[i];
+                    result.push({
+                        tagName: elem.tagName,
+                        className: elem.className,
+                        id: elem.id,
+                        role: elem.getAttribute('role'),
+                        placeholder: elem.getAttribute('placeholder'),
+                        text: elem.textContent.substring(0, 50)
+                    });
+                }
+                return result;
+            """)
+            
+            if js_result:
+                logger.info(f"📊 JavaScript找到 {len(js_result)} 个contenteditable元素:")
+                for i, elem_info in enumerate(js_result):
+                    logger.info(f"  [{i+1}] {elem_info}")
+                    
+                # 尝试使用第一个找到的元素
+                if js_result:
+                    first_elem = driver.execute_script("""
+                        return document.querySelectorAll('[contenteditable="true"]')[0];
+                    """)
+                    if first_elem and first_elem.is_enabled():
+                        logger.info("✅ 通过JavaScript找到内容编辑器")
+                        return first_elem
+        except Exception as e:
+            logger.warning(f"JavaScript查找失败: {e}")
         
         logger.error("❌ 未找到可用的内容编辑器")
         return None
@@ -849,13 +920,15 @@ class XHSContentFiller(IContentFiller):
                     continue
             
             # 获取内容
-            try:
-                content_elements = driver.find_elements(By.CSS_SELECTOR, XHSSelectors.CONTENT_EDITOR)
-                if content_elements and content_elements[0].is_displayed():
-                    result["has_content_editor"] = True
-                    result["content"] = content_elements[0].text or ""
-            except:
-                pass
+            for selector in get_content_editor_selectors():
+                try:
+                    content_elements = driver.find_elements(By.CSS_SELECTOR, selector)
+                    if content_elements and content_elements[0].is_displayed():
+                        result["has_content_editor"] = True
+                        result["content"] = content_elements[0].text or ""
+                        break
+                except:
+                    continue
             
             return result
             
