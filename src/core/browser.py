@@ -157,12 +157,20 @@ class ChromeDriverManager:
         # 窗口大小
         chrome_options.add_argument('--window-size=1920,1080')
 
-        # 添加文件保存位置
-        home_dir = os.path.expanduser("~")
-        # 创建一个专门用于存放chrome数据的文件夹路径
-        profile_path = os.path.join(home_dir, "xhs-toolkit-chrome-data")
-
+        # 添加文件保存位置（为每个实例创建唯一目录）
+        import tempfile
+        import uuid
+        
+        # 创建临时的唯一用户数据目录
+        temp_dir = tempfile.gettempdir()
+        unique_id = str(uuid.uuid4())[:8]  # 使用UUID的前8位作为唯一标识
+        profile_path = os.path.join(temp_dir, f"xhs-toolkit-chrome-{unique_id}")
+        
+        # 确保目录存在
+        os.makedirs(profile_path, exist_ok=True)
+        
         chrome_options.add_argument(f'--user-data-dir={profile_path}')
+        logger.debug(f"使用唯一用户数据目录: {profile_path}")
         
         # 调试选项
         if self.config.debug_mode:

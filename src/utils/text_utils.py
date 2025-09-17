@@ -40,6 +40,49 @@ def clean_text_for_browser(text: str) -> str:
     return cleaned_text
 
 
+def clean_text_for_xiaohongshu(text: str) -> str:
+    """
+    专门为小红书编辑器清理文本
+    
+    小红书的TipTap编辑器有特殊限制：
+    1. 不支持连续空格
+    2. 不支持制表符
+    3. 对某些特殊字符敏感
+    
+    Args:
+        text: 原始文本
+        
+    Returns:
+        适合小红书编辑器的清理后文本
+    """
+    if not text:
+        return ""
+    
+    # 首先进行基础清理
+    cleaned_text = clean_text_for_browser(text)
+    
+    # 小红书特殊处理
+    # 1. 替换制表符为空格
+    cleaned_text = cleaned_text.replace('\t', ' ')
+    
+    # 2. 清理连续空格（小红书编辑器不支持）
+    # 保留单个空格和换行符
+    cleaned_text = re.sub(r' {2,}', ' ', cleaned_text)
+    
+    # 3. 清理行首行尾空格，但保留段落间的换行
+    lines = cleaned_text.split('\n')
+    cleaned_lines = [line.strip() for line in lines]
+    cleaned_text = '\n'.join(cleaned_lines)
+    
+    # 4. 减少连续的换行符（超过2个连续换行符替换为2个）
+    cleaned_text = re.sub(r'\n{3,}', '\n\n', cleaned_text)
+    
+    # 5. 清理文本开头和结尾的空白
+    cleaned_text = cleaned_text.strip()
+    
+    return cleaned_text
+
+
 def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
     """
     截断文本到指定长度

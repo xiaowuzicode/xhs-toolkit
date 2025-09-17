@@ -18,7 +18,7 @@ from ..core.config import XHSConfig
 from ..core.browser import ChromeDriverManager
 from ..core.exceptions import PublishError, NetworkError, handle_exception
 from ..auth.cookie_manager import CookieManager
-from ..utils.text_utils import clean_text_for_browser, truncate_text
+from ..utils.text_utils import clean_text_for_browser, clean_text_for_xiaohongshu, truncate_text
 from ..utils.logger import get_logger
 from .models import XHSNote, XHSSearchResult, XHSUser, XHSPublishResult, XHSUrlParseResult
 from .components.content_filler import XHSContentFiller
@@ -465,7 +465,7 @@ class XHSClient:
             
             # 处理内容，支持换行
             from selenium.webdriver.common.keys import Keys
-            cleaned_content = clean_text_for_browser(note.content)
+            cleaned_content = clean_text_for_xiaohongshu(note.content)
             
             # 分段输入，正确处理换行
             lines = cleaned_content.split('\n')

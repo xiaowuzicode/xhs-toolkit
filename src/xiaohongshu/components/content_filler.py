@@ -16,7 +16,7 @@ from ..interfaces import IContentFiller, IBrowserManager
 from ..constants import (XHSConfig, XHSSelectors, get_title_input_selectors, get_content_editor_selectors)
 from ...core.exceptions import PublishError, handle_exception
 from ...utils.logger import get_logger
-from ...utils.text_utils import clean_text_for_browser
+from ...utils.text_utils import clean_text_for_browser, clean_text_for_xiaohongshu
 
 logger = get_logger(__name__)
 
@@ -365,8 +365,27 @@ class XHSContentFiller(IContentFiller):
             填写是否成功
         """
         try:
-            # 点击编辑器以获得焦点
-            content_editor.click()
+            # 点击编辑器以获得焦点（避免点击拦截）
+            driver = self.browser_manager.driver
+            try:
+                # 滚动到元素可见
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", content_editor)
+                await asyncio.sleep(0.3)
+                
+                # 使用JavaScript获得焦点
+                driver.execute_script("arguments[0].focus();", content_editor)
+                await asyncio.sleep(0.3)
+                
+                # 备用点击方案
+                try:
+                    content_editor.click()
+                except Exception as click_error:
+                    logger.debug(f"直接点击失败，使用JavaScript点击: {click_error}")
+                    driver.execute_script("arguments[0].click();", content_editor)
+                    
+            except Exception as focus_error:
+                logger.warning(f"编辑器获得焦点时出错: {focus_error}")
+                
             await asyncio.sleep(0.5)
             
             # 清空现有内容
@@ -378,8 +397,8 @@ class XHSContentFiller(IContentFiller):
             content_editor.send_keys(Keys.DELETE)
             await asyncio.sleep(0.5)
             
-            # 输入内容
-            cleaned_content = clean_text_for_browser(content)
+            # 输入内容（使用专门的小红书文本清理）
+            cleaned_content = clean_text_for_xiaohongshu(content)
             
             # 分段输入，避免一次输入过多内容
             lines = cleaned_content.split('\n')
@@ -439,11 +458,30 @@ class XHSContentFiller(IContentFiller):
             
             logger.info(f"✅ 找到内容编辑器，开始添加 {len(topics)} 个话题")
             
-            # 2. 确保编辑器获得焦点并移动到末尾
-            content_editor.click()
-            await asyncio.sleep(0.3)
-            content_editor.send_keys(Keys.END)
-            await asyncio.sleep(0.2)
+            # 2. 确保编辑器获得焦点并移动到末尾（避免点击拦截）
+            try:
+                # 尝试滚动到元素可见
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", content_editor)
+                await asyncio.sleep(0.5)
+                
+                # 尝试使用JavaScript点击（避免被其他元素拦截）
+                driver.execute_script("arguments[0].focus();", content_editor)
+                await asyncio.sleep(0.3)
+                
+                # 备用方案：如果JavaScript焦点失败，尝试直接点击
+                try:
+                    content_editor.click()
+                except Exception as click_error:
+                    logger.debug(f"直接点击失败，使用JavaScript点击: {click_error}")
+                    driver.execute_script("arguments[0].click();", content_editor)
+                
+                await asyncio.sleep(0.3)
+                content_editor.send_keys(Keys.END)
+                await asyncio.sleep(0.2)
+                
+            except Exception as focus_error:
+                logger.warning(f"编辑器获得焦点时出错: {focus_error}")
+                # 继续尝试后续操作
             
             # 3. 添加换行确保话题在新行
             content_editor.send_keys(Keys.ENTER)
@@ -567,8 +605,21 @@ class XHSContentFiller(IContentFiller):
             
             # 方法1: 使用Actions类逐字符输入（最接近真实用户行为）
             try:
+                # 先确保元素可见和可点击
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", content_editor)
+                await asyncio.sleep(0.3)
+                
                 actions = ActionChains(driver)
-                actions.click(content_editor)
+                
+                # 使用JavaScript确保焦点，避免点击拦截
+                try:
+                    driver.execute_script("arguments[0].focus();", content_editor)
+                    await asyncio.sleep(0.2)
+                    actions.click(content_editor)
+                except Exception as click_error:
+                    logger.debug(f"Actions点击失败，使用JavaScript: {click_error}")
+                    driver.execute_script("arguments[0].click();", content_editor)
+                    
                 await asyncio.sleep(0.2)
                 
                 # 逐字符输入，每个字符间隔模拟真实打字
@@ -649,17 +700,46 @@ class XHSContentFiller(IContentFiller):
         except Exception as e:
             logger.error(f"❌ 改进的真实输入失败: {e}")
             
-            # 最后的备用方法：简单直接输入
+            # 最后的备用方法：纯JavaScript输入（最稳定）
             try:
-                logger.debug("🔄 使用最简单的备用输入方法")
-                content_editor.clear()
-                await asyncio.sleep(0.1)
-                content_editor.send_keys(topic_text)
-                await asyncio.sleep(0.3)
+                logger.debug("🔄 使用纯JavaScript备用输入方法")
+                
+                # 使用JavaScript直接插入文本到编辑器
+                insert_script = """
+                var editor = arguments[0];
+                var text = arguments[1];
+                
+                // 确保编辑器有焦点
+                editor.focus();
+                
+                // 获取当前光标位置或移动到末尾
+                var selection = window.getSelection();
+                var range = document.createRange();
+                range.selectNodeContents(editor);
+                range.collapse(false);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                
+                // 插入文本
+                document.execCommand('insertText', false, text);
+                
+                // 触发input事件
+                var event = new Event('input', { bubbles: true });
+                editor.dispatchEvent(event);
+                
+                return true;
+                """
+                
+                result = driver.execute_script(insert_script, content_editor, topic_text)
+                await asyncio.sleep(0.5)
+                
+                # 按回车键
                 content_editor.send_keys(Keys.ENTER)
                 await asyncio.sleep(0.5)
+                
                 return True
-            except:
+            except Exception as js_error:
+                logger.debug(f"JavaScript输入也失败: {js_error}")
                 return False
     
     async def _wait_for_topic_dropdown_flexible(self, timeout: float = 1.5) -> bool:

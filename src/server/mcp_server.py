@@ -62,9 +62,25 @@ class TaskManager:
     def __init__(self):
         self.tasks: Dict[str, PublishTask] = {}
         self.running_tasks: Dict[str, asyncio.Task] = {}
+        self.content_hashes: Dict[str, str] = {}  # 用于防重复提交
 
     def create_task(self, note: XHSNote) -> str:
-        """创建新任务"""
+        """创建新任务，防止重复提交"""
+        import hashlib
+        
+        # 创建内容哈希用于防重复
+        content_str = f"{note.title}|{note.content}|{','.join(note.images or [])}|{','.join(note.videos or [])}|{','.join(note.topics or [])}"
+        content_hash = hashlib.md5(content_str.encode()).hexdigest()
+        
+        # 检查是否已有相同内容的任务在运行
+        for existing_task_id, existing_task in self.tasks.items():
+            if (existing_task.status in ["pending", "validating", "initializing", "uploading", "publishing"] 
+                and existing_task_id in self.content_hashes 
+                and self.content_hashes[existing_task_id] == content_hash):
+                logger.warning(f"⚠️ 检测到重复提交，返回现有任务: {existing_task_id}")
+                return existing_task_id
+        
+        # 创建新任务
         task_id = str(uuid.uuid4())[:8]  # 使用短ID
         task = PublishTask(
             task_id=task_id,
@@ -75,6 +91,7 @@ class TaskManager:
             start_time=time.time()
         )
         self.tasks[task_id] = task
+        self.content_hashes[task_id] = content_hash
         logger.info(f"📋 创建新任务: {task_id} - {note.title}")
         return task_id
 
@@ -96,6 +113,9 @@ class TaskManager:
                 task.result = result
             if status in ["completed", "failed"]:
                 task.end_time = time.time()
+                # 清理完成任务的哈希
+                if task_id in self.content_hashes:
+                    del self.content_hashes[task_id]
             logger.info(f"📋 更新任务 {task_id}: {status} ({progress}%) - {message}")
 
     def remove_old_tasks(self, max_age_seconds: int = 3600):
@@ -322,8 +342,25 @@ class MCPServer:
 
                 # 创建异步任务
                 task_id = self.task_manager.create_task(note)
+                
+                # 检查是否为重复任务（通过检查任务是否已在运行队列中）
+                if task_id in self.task_manager.running_tasks:
+                    # 重复任务，返回现有任务信息
+                    existing_task = self.task_manager.get_task(task_id)
+                    logger.info(f"🔄 返回现有任务状态: {task_id} - {existing_task.status}")
+                    
+                    result = {
+                        "success": True,
+                        "task_id": task_id,
+                        "message": f"检测到重复提交，返回现有任务状态: {existing_task.status}",
+                        "next_step": f"请使用 check_task_status('{task_id}') 查看进度",
+                        "duplicate_detected": True,
+                        "existing_status": existing_task.status,
+                        "existing_progress": existing_task.progress
+                    }
+                    return json.dumps(result, ensure_ascii=False, indent=2)
 
-                # 启动后台任务
+                # 启动后台任务（仅对新任务）
                 async_task = asyncio.create_task(self._execute_publish_task(task_id))
                 self.task_manager.running_tasks[task_id] = async_task
 
